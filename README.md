@@ -21,7 +21,7 @@ Fork agnóstico (MIT) do ralph-loop do bc-harness + painel de terminal
 Na máquina, uma vez:
 
 ```bash
-git clone https://github.com/<seu-usuario>/loop-enginner.git
+git clone https://github.com/nandinhos/loop-enginner.git
 cd loop-enginner
 ./install-global.sh        # symlink ~/.local/bin/loop-enginner -> este repo
 loop-enginner doctor       # checa bash, git e engine no PATH

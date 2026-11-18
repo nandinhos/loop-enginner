@@ -1,6 +1,6 @@
 # STATUS — Loop Enginner
 
-Atualizado em 2026-11-18 · Versão: **0.1.0** (`VERSION`) · Branch: `main`
+Atualizado em 2026-11-18 · Versão: **0.1.0** (`VERSION`) · Branches: `main` / `dev`
 
 ## Feito e provado (evidência: `bash tests/run-tests.sh` → 3/3)
 
@@ -13,13 +13,12 @@ Atualizado em 2026-11-18 · Versão: **0.1.0** (`VERSION`) · Branch: `main`
 | Sintaxe + shellcheck + desacoplamento | ✅ | `tests/test-syntax.sh` (grep anti-resíduo na lib) |
 | Fork reproduzível | ✅ | `tools/fork-from-upstream.py` regerou a lib com hashes idênticos |
 | Install global (symlink) | ✅ provado em prefixo descartável | `PREFIX=/tmp/le-prefix ./install-global.sh` + doctor + `--uninstall` |
+| Repositório remoto (GitHub) | ✅ | `https://github.com/nandinhos/loop-enginner` (público, `main` e `dev`) |
 
 ## Não provado / não feito
 
 - **Run com engine real** (`codex`/`claude`): nunca executado neste fork.
   Exige branch descartável, árvore limpa e quota — decisão manual do humano.
-- **Publicação no GitHub:** repo é só local; `README.md` usa
-  `<seu-usuario>` como placeholder da URL de clone.
 - **Install global nesta máquina:** o symlink em `~/.local/bin` ainda não
   foi criado (proposital; `./install-global.sh` quando o humano quiser).
 - **Adapters Antigravity/OpenCode:** planejados, não implementados —

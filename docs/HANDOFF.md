@@ -31,8 +31,9 @@ original (`ralph.sh` modificado + `ralph-watch.sh` com o banner
 forkada para cá, desacoplada e empacotada. Estado e provas detalhadas em
 [STATUS.md](STATUS.md); transformações exatas no `NOTICE`.
 
-Nada foi publicado: sem remote, sem install global nesta máquina, nenhum
-run com engine real neste fork.
+Repositório remoto publicado em `https://github.com/nandinhos/loop-enginner.git`
+(público, branches `main` e `dev`); ainda sem install global nesta máquina
+e sem run com engine real neste fork.
 
 ## Próxima tarefa — Fase A: adapters de provider no fallback
 
@@ -103,14 +104,12 @@ prática; leia antes de desenhar a A3, não copie código sem desacoplar:
 
 ## Fora de escopo desta fase
 
-- Publicar no GitHub / criar remote (decisão do dono: conta e visibilidade).
 - Rodar run real de validação com engine de verdade (quota + commits reais;
   só manual, em branch descartável, quando o dono pedir).
 - Mudar gates, formato de fases ou mensagens de commit do motor.
 
 ## Perguntas abertas para o humano
 
-1. Conta/visibilidade do repositório no GitHub (trocar `<seu-usuario>` no README).
-2. `./install-global.sh` nesta máquina agora, ou só após o primeiro run real?
-3. Na A3, a cadeia padrão deve ser só as engines instaladas detectadas em
+1. `./install-global.sh` nesta máquina agora, ou só após o primeiro run real?
+2. Na A3, a cadeia padrão deve ser só as engines instaladas detectadas em
    runtime, ou fixa com erro alto se faltar um degrau?
