@@ -1,0 +1,4 @@
+# Runtime de runs feitos NESTE repo (o loop tambem se exclui via exclude)
+.loop-enginner/
+*.log
+__pycache__/

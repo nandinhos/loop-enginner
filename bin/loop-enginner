@@ -1,0 +1,378 @@
+#!/usr/bin/env bash
+#
+# loop-enginner — CLI do Loop Enginner: loops estruturados e autonomos sobre
+# qualquer repo Git, sem tocar em arquivos rastreados do projeto-alvo.
+#
+# Comandos:
+#   install    instala no projeto atual (so .loop-enginner/ + .git/info/exclude)
+#   uninstall  remove exatamente o que o install criou (fail-closed)
+#   new        cria .loop-enginner/PHASES.md a partir do template
+#   run        roda o loop (lib/loop.sh) no projeto atual
+#   watch      abre o painel (lib/loop-watch.sh)
+#   status     mostra instalacao, engines e estado do ultimo run
+#   doctor     checa pre-requisitos da maquina
+#   version    imprime a versao
+#   help       esta ajuda
+#
+# Instalacao na maquina (uma vez): ./install-global.sh cria o symlink em
+# ~/.local/bin. Desinstalar da maquina: ./install-global.sh --uninstall.
+set -euo pipefail
+
+resolve_home() {
+  if [ -n "${LOOP_ENGINNER_HOME:-}" ]; then
+    printf '%s' "$LOOP_ENGINNER_HOME"
+    return 0
+  fi
+  local src="${BASH_SOURCE[0]}"
+  if command -v readlink >/dev/null 2>&1; then
+    src="$(readlink -f "$src" 2>/dev/null || printf '%s' "$src")"
+  fi
+  cd "$(dirname "$src")/.." && pwd
+}
+
+HOME_DIR="$(resolve_home)"
+LIB_DIR="$HOME_DIR/lib"
+TEMPLATES_DIR="$HOME_DIR/templates"
+VERSION_FILE="$HOME_DIR/VERSION"
+
+loop_version() {
+  if [ -f "$VERSION_FILE" ]; then
+    tr -d '[:space:]' < "$VERSION_FILE"
+  else
+    printf 'desconhecida'
+  fi
+}
+
+die() { printf 'loop-enginner: erro: %s\n' "$*" >&2; exit 1; }
+info() { printf 'loop-enginner: %s\n' "$*"; }
+ok() { printf 'loop-enginner: ok: %s\n' "$*"; }
+warn() { printf 'loop-enginner: aviso: %s\n' "$*" >&2; }
+
+usage() {
+  cat <<'EOF'
+loop-enginner — loops estruturados autonomos em qualquer repo Git
+
+Uso:
+  loop-enginner install [--target DIR]
+  loop-enginner uninstall [--target DIR] [--purge]
+  loop-enginner new [--target DIR]
+  loop-enginner run [opcoes do loop] [PHASES.md]
+  loop-enginner watch [opcoes do painel]
+  loop-enginner status [--target DIR]
+  loop-enginner doctor
+  loop-enginner version
+  loop-enginner help
+
+O install de projeto escreve SOMENTE:
+  .loop-enginner/install.manifest   registro do que foi criado
+  .loop-enginner/config.env.example copia de referencia (nao e lida)
+  .loop-enginner/PHASES.example.md  exemplo do contrato de fases
+  .loop-enginner/hook.example.sh    exemplo de hook de eventos
+  a linha '/.loop-enginner/' em .git/info/exclude (nunca no .gitignore)
+
+O uninstall remove SOMENTE o que esta no manifest + o runtime
+(state/, logs/, prompts/, run/). Arquivos seus dentro de .loop-enginner/
+(PHASES.md, hook.sh, config.env) sao preservados; --purge apaga tudo.
+
+Opcoes do run: repassadas ao loop (veja 'loop-enginner run --help').
+EOF
+}
+
+target_root() {
+  # $1 = dir pedido (pode ser vazio). Resolve a raiz git; falha se nao for repo.
+  local dir="${1:-.}"
+  [ -d "$dir" ] || die "diretorio alvo nao existe: $dir"
+  local root
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" \
+    || die "'$dir' nao esta dentro de um repositorio Git (o loop commita por fase)"
+  printf '%s' "$root"
+}
+
+parse_target() {
+  # ecoa o valor de --target dos args restantes; resto vai para REST_ARGS
+  TARGET_ARG=""
+  REST_ARGS=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --target)
+        [ "$#" -ge 2 ] || die "--target exige um diretorio"
+        TARGET_ARG="$2"; shift 2 ;;
+      --target=*)
+        TARGET_ARG="${1#*=}"; shift ;;
+      *)
+        REST_ARGS+=("$1"); shift ;;
+    esac
+  done
+}
+
+MANIFEST_NAME="install.manifest"
+EXCLUDE_LINE='/.loop-enginner/'
+CREATED_FILES=()
+
+install_copy_if_absent() {
+  # $1 = template, $2 = destino. Nunca sobrescreve arquivo existente.
+  local src="$1" dst="$2"
+  if [ -e "$dst" ]; then
+    warn "ja existe, preservado: ${dst#"$ROOT"/}"
+    return 0
+  fi
+  cp "$src" "$dst"
+  CREATED_FILES+=("${dst#"$ROOT"/}")
+  info "criado: ${dst#"$ROOT"/}"
+}
+
+cmd_install() {
+  parse_target "$@"
+  [ "${#REST_ARGS[@]}" -eq 0 ] || die "argumentos nao reconhecidos: ${REST_ARGS[*]}"
+  ROOT="$(target_root "$TARGET_ARG")"
+  local dir="$ROOT/.loop-enginner"
+  local manifest="$dir/$MANIFEST_NAME"
+
+  if [ -f "$manifest" ]; then
+    info "ja instalado em $ROOT (manifest presente; nada a fazer)"
+    info "para reinstalar: loop-enginner uninstall && loop-enginner install"
+    return 0
+  fi
+
+  mkdir -p "$dir"
+  CREATED_FILES=()
+  install_copy_if_absent "$TEMPLATES_DIR/config.env.example" "$dir/config.env.example"
+  install_copy_if_absent "$TEMPLATES_DIR/PHASES.example.md" "$dir/PHASES.example.md"
+  install_copy_if_absent "$TEMPLATES_DIR/hook.example.sh" "$dir/hook.example.sh"
+
+  local exclude_file exclude_added=0
+  exclude_file="$(git -C "$ROOT" rev-parse --git-dir)/info/exclude"
+  case "$exclude_file" in
+    /*) ;;
+    *) exclude_file="$ROOT/$exclude_file" ;;
+  esac
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+  if ! grep -qxF "$EXCLUDE_LINE" "$exclude_file"; then
+    printf '%s\n' "$EXCLUDE_LINE" >> "$exclude_file"
+    exclude_added=1
+    info "registrado $EXCLUDE_LINE em .git/info/exclude"
+  fi
+
+  {
+    printf 'tool=loop-enginner\n'
+    printf 'version=%s\n' "$(loop_version)"
+    printf 'home=%s\n' "$HOME_DIR"
+    printf 'installed_at=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    printf 'exclude_added=%s\n' "$exclude_added"
+    local f
+    for f in "${CREATED_FILES[@]:-}"; do
+      [ -n "$f" ] && printf 'file=%s\n' "$f"
+    done
+  } > "$manifest"
+
+  ok "instalado em $ROOT"
+  info "proximo passo: loop-enginner new   (cria o seu PHASES.md)"
+  info "depois:        loop-enginner run   (arvore git limpa, branch descartavel)"
+}
+
+manifest_value() {
+  # $1 = manifest, $2 = chave -> primeiro valor
+  grep -E "^$2=" "$1" 2>/dev/null | head -n 1 | cut -d= -f2- || true
+}
+
+cmd_uninstall() {
+  local purge=0
+  local args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --purge) purge=1; shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  parse_target "${args[@]:-}"
+  ROOT="$(target_root "$TARGET_ARG")"
+  local dir="$ROOT/.loop-enginner"
+  local manifest="$dir/$MANIFEST_NAME"
+
+  # Fail-closed: sem manifest nao sabemos o que e nosso; nao apagar no escuro.
+  if [ ! -f "$manifest" ]; then
+    if [ "$purge" -eq 1 ] && [ -d "$dir" ]; then
+      warn "sem manifest; --purge remove $dir inteiro por sua conta"
+      rm -rf "$dir"
+      remove_exclude_line
+      ok "removido (purge sem manifest)"
+      return 0
+    fi
+    die "nao instalado em $ROOT (sem $MANIFEST_NAME). Para apagar manualmente: rm -rf '$dir'"
+  fi
+
+  local tool
+  tool="$(manifest_value "$manifest" tool)"
+  [ "$tool" = "loop-enginner" ] || die "manifest nao e do loop-enginner (tool=$tool); abortado"
+
+  # 1. arquivos criados pelo install (e somente eles)
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      .loop-enginner/*) ;;
+      *) warn "entrada fora de .loop-enginner/ ignorada: $f"; continue ;;
+    esac
+    if [ -e "$ROOT/$f" ]; then
+      rm -f "$ROOT/$f"
+      info "removido: $f"
+    fi
+  done <<EOF
+$(grep -E '^file=' "$manifest" | cut -d= -f2-)
+EOF
+
+  # 2. runtime gerado pelos runs
+  local sub
+  for sub in state logs prompts run; do
+    if [ -d "$dir/$sub" ]; then
+      rm -rf "$dir/$sub"
+      info "removido runtime: .loop-enginner/$sub/"
+    fi
+  done
+
+  # 3. exclude, somente se fomos nos que adicionamos a linha
+  if [ "$(manifest_value "$manifest" exclude_added)" = "1" ]; then
+    remove_exclude_line
+  else
+    info "linha de exclude preexistente preservada"
+  fi
+
+  rm -f "$manifest"
+
+  # 4. o que sobrou e do usuario (PHASES.md, hook.sh, config.env...)
+  if [ "$purge" -eq 1 ]; then
+    rm -rf "$dir"
+    ok "desinstalado com --purge (nada preservado)"
+    return 0
+  fi
+  if [ -d "$dir" ]; then
+    if rmdir "$dir" 2>/dev/null; then
+      ok "desinstalado de $ROOT (diretorio removido, estava vazio)"
+    else
+      ok "desinstalado de $ROOT"
+      warn "preservado (arquivos seus): $(ls -A "$dir" | tr '\n' ' ')"
+      warn "para apagar tudo: loop-enginner uninstall --purge"
+    fi
+  else
+    ok "desinstalado de $ROOT"
+  fi
+}
+
+remove_exclude_line() {
+  local exclude_file
+  exclude_file="$(git -C "$ROOT" rev-parse --git-dir 2>/dev/null)/info/exclude" || return 0
+  case "$exclude_file" in
+    /*) ;;
+    *) exclude_file="$ROOT/$exclude_file" ;;
+  esac
+  [ -f "$exclude_file" ] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  grep -vxF "$EXCLUDE_LINE" "$exclude_file" > "$tmp" || true
+  cat "$tmp" > "$exclude_file"
+  rm -f "$tmp"
+  info "linha $EXCLUDE_LINE removida de .git/info/exclude"
+}
+
+cmd_new() {
+  parse_target "$@"
+  ROOT="$(target_root "$TARGET_ARG")"
+  local dst="$ROOT/.loop-enginner/PHASES.md"
+  [ -e "$dst" ] && die "ja existe .loop-enginner/PHASES.md (nada sobrescrito)"
+  mkdir -p "$ROOT/.loop-enginner"
+  cp "$TEMPLATES_DIR/PHASES.example.md" "$dst"
+  ok "criado .loop-enginner/PHASES.md — edite as fases e tasks antes de rodar"
+}
+
+cmd_run() {
+  [ -x "$LIB_DIR/loop.sh" ] || die "lib/loop.sh nao encontrado em $HOME_DIR (clone incompleto?)"
+  ROOT="$(target_root ".")"
+  cd "$ROOT"
+  exec bash "$LIB_DIR/loop.sh" "$@"
+}
+
+cmd_watch() {
+  [ -x "$LIB_DIR/loop-watch.sh" ] || die "lib/loop-watch.sh nao encontrado em $HOME_DIR (clone incompleto?)"
+  # Sem caminho posicional, o painel le o repo atual.
+  exec bash "$LIB_DIR/loop-watch.sh" "$@"
+}
+
+cmd_status() {
+  parse_target "$@"
+  ROOT="$(target_root "$TARGET_ARG")"
+  local dir="$ROOT/.loop-enginner"
+  printf 'projeto:  %s\n' "$ROOT"
+  printf 'versao:   %s (home: %s)\n' "$(loop_version)" "$HOME_DIR"
+  if [ -f "$dir/$MANIFEST_NAME" ]; then
+    printf 'install:  sim (versao %s, em %s)\n' \
+      "$(manifest_value "$dir/$MANIFEST_NAME" version)" \
+      "$(manifest_value "$dir/$MANIFEST_NAME" installed_at)"
+  else
+    printf 'install:  nao (rode: loop-enginner install)\n'
+  fi
+  printf 'engines:  codex=%s claude=%s\n' \
+    "$(command -v codex 2>/dev/null || printf 'ausente')" \
+    "$(command -v claude 2>/dev/null || printf 'ausente')"
+  local run_tsv="$dir/state/run.tsv"
+  if [ -f "$run_tsv" ]; then
+    local st ph
+    st="$(awk -F'\t' '$1=="META" && $2=="status" {v=$3} END {print v}' "$run_tsv")"
+    ph="$(awk -F'\t' '$1=="META" && $2=="phase_cur" {v=$3} END {print v}' "$run_tsv")"
+    printf 'ultimo run: status=%s fase=%s (detalhe: loop-enginner watch --once)\n' "${st:-?}" "${ph:-?}"
+  else
+    printf 'ultimo run: nenhum estado em .loop-enginner/state/\n'
+  fi
+}
+
+cmd_doctor() {
+  local fails=0
+  check() {
+    if "$@" >/dev/null 2>&1; then
+      printf '  ok      %s\n' "$1"
+    else
+      printf '  FALTA   %s\n' "$1"
+      fails=$((fails + 1))
+    fi
+  }
+  printf 'loop-enginner %s — home: %s\n' "$(loop_version)" "$HOME_DIR"
+  check bash --version
+  check git --version
+  [ -x "$LIB_DIR/loop.sh" ] && printf '  ok      lib/loop.sh executavel\n' \
+    || { printf '  FALTA   lib/loop.sh executavel\n'; fails=$((fails + 1)); }
+  [ -x "$LIB_DIR/loop-watch.sh" ] && printf '  ok      lib/loop-watch.sh executavel\n' \
+    || { printf '  FALTA   lib/loop-watch.sh executavel\n'; fails=$((fails + 1)); }
+  if command -v codex >/dev/null 2>&1 || command -v claude >/dev/null 2>&1; then
+    printf '  ok      ao menos uma engine (codex|claude) no PATH\n'
+  else
+    printf '  FALTA   engine codex ou claude no PATH\n'
+    fails=$((fails + 1))
+  fi
+  if command -v shellcheck >/dev/null 2>&1; then
+    printf '  ok      shellcheck (opcional)\n'
+  else
+    printf '  --      shellcheck ausente (opcional, so para desenvolvimento)\n'
+  fi
+  [ "$fails" -eq 0 ] || die "doctor encontrou $fails problema(s)"
+  ok "doctor: tudo pronto"
+}
+
+main() {
+  local cmd="${1:-help}"
+  case "$cmd" in
+    install)   shift; cmd_install "$@" ;;
+    uninstall) shift; cmd_uninstall "$@" ;;
+    new)       shift; cmd_new "$@" ;;
+    run)       shift; cmd_run "$@" ;;
+    watch)     shift; cmd_watch "$@" ;;
+    status)    shift; cmd_status "$@" ;;
+    doctor)    shift; cmd_doctor "$@" ;;
+    version|--version|-v) printf 'loop-enginner %s\n' "$(loop_version)" ;;
+    help|--help|-h) usage ;;
+    *) die "comando desconhecido: $cmd (veja: loop-enginner help)" ;;
+  esac
+}
+
+main "$@"
+
+

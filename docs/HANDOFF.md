@@ -1,0 +1,116 @@
+# HANDOFF — continuação via Antigravity (agy)
+
+Gerado em 2026-11-18, sobre o commit inicial deste repo (v0.1.0).
+Destinatário: próximo agente (Antigravity) e o humano que o conduz.
+
+## Como retomar em 2 minutos
+
+```bash
+cd loop-enginner
+bash tests/run-tests.sh        # baseline: 3 passaram, 0 falharam
+agy
+```
+
+Primeiro prompt sugerido no agy:
+
+```text
+/goal Leia AGENTS.md, docs/STATUS.md e docs/HANDOFF.md. Execute a Fase A1
+(adapter Antigravity) respeitando as invariantes do AGENTS.md: baseline
+verde antes e depois, testes somente com mock, commits em pt-BR sem
+Co-Authored-By. Pare e pergunte se alguma decisao fechada precisar mudar.
+```
+
+Se preferir validar o entendimento antes: troque `/goal` por `/grill-me`.
+
+## Onde paramos
+
+O projeto nasceu em uma sessão de varredura + construção: a adaptação
+original (`ralph.sh` modificado + `ralph-watch.sh` com o banner
+“Loop Engineer”) vivia só na instalação do bc-harness em
+`~/.claude-profiles/bc/plugins/marketplaces/beer-and-code/scripts/` e foi
+forkada para cá, desacoplada e empacotada. Estado e provas detalhadas em
+[STATUS.md](STATUS.md); transformações exatas no `NOTICE`.
+
+Nada foi publicado: sem remote, sem install global nesta máquina, nenhum
+run com engine real neste fork.
+
+## Próxima tarefa — Fase A: adapters de provider no fallback
+
+Objetivo (pedido do dono): incluir **Antigravity (`agy`)** e
+**OpenCode (`opencode`)** como adapters, trazendo modelos distintos para
+a cadeia de fallback do loop. Ordem sugerida, um adapter por vez, cada um
+com seus testes antes do próximo:
+
+### A1 — Adapter Antigravity (`agy`)
+
+- Desenhar a seam mínima: hoje `lib/loop.sh` conhece `--engine codex|claude`
+  e invoca a CLI em `run_engine()` (≈ linha 1440). O adapter novo entra
+  atrás do **mesmo contrato de sessão**: prompt auto-contido entra, a
+  sessão escreve código, gate 0 continua sendo exit/stream — nunca o
+  exit code decidindo sozinho além do gate 0.
+- Investigar antes de codar (comando real, nesta máquina): como o `agy`
+  roda headless/batch (`agy --print` é BATCH — processa e imprime no fim),
+  formato de saída, timeout e como os marcadores `LOOP-TASK` atravessam.
+- **Lição herdada (não repetir):** no ecossistema do dono, um vigia de
+  progresso por "houve saída" já matou o `agy --print` duas vezes
+  (2026-09-06) porque batch fica em silêncio legítimo. Qualquer vigia/
+  timeout de inatividade tem que ser **por provider**, nunca global.
+
+### A2 — Adapter OpenCode (`opencode`)
+
+- Mesmo contrato da A1. Investigar `opencode run` headless, formato de
+  saída/stream e seleção de modelo por variável de ambiente.
+- Só começar depois da A1 verde e commitada.
+
+### A3 — Cadeia de fallback configurável
+
+- Ex.: `LOOP_ENGINNER_FALLBACK_CHAIN="codex agy opencode"` (nome final a
+  decidir na fase). A engine primária continua vindo de `--engine`.
+- **Gatilhos só com prova:** quota, limite de uso, autenticação,
+  indisponibilidade, travamento sem progresso. Regra herdada: regex de
+  gatilho nova exige reprodução + teste — e o padrão só é consultado
+  **depois** de a sessão falhar, nunca sobre texto comum de log (em
+  2026-09-06 um fallback disparou porque o agente apenas *leu* um arquivo
+  contendo as expressões).
+
+### Critérios de aceite por fase (A1/A2/A3)
+
+1. `bash tests/run-tests.sh` verde, com **teste novo por adapter** usando
+   mock no PATH (padrão de `tests/test-loop-mock.sh`): sessão mock escreve,
+   gates passam, 1 commit por fase, estado publicado.
+2. Teste de fallback (A3) com mock que falha pelo gatilho alvo e prova a
+   troca de provider — e um teste negativo provando que log comum contendo
+   a expressão do gatilho **não** dispara troca quando a sessão teve sucesso.
+3. `loop-enginner doctor`/`status` enxergam o provider novo; painel mostra
+   o provider efetivo (o dashboard exibe a *engine*; não confundir).
+4. `README.md`, `docs/STATUS.md`, `CHANGELOG.md` e este HANDOFF atualizados
+   no mesmo commit; `VERSION` sobe (minor).
+5. Nenhum nome de projeto/máquina do dono entra na lib (o teste de
+   desacoplamento em `tests/test-syntax.sh` é o guarda — estenda-o se
+   surgirem nomes novos a banir).
+
+### Leitura de referência (fora deste repo, na máquina do dono)
+
+Estes projetos são os laboratórios onde o fallback já foi aprendido na
+prática; leia antes de desenhar a A3, não copie código sem desacoplar:
+
+- `~/projects/watcher-features/foundation/docs/adr/0010-cadeia-de-provider-por-shim-no-path.md`
+  e `scripts/ralph-dispatch.sh` (cadeia, gatilhos, vigia por provider).
+- `~/projects/watcher/docs/handoffs/2026-09-06-abstracao-ralph-events.md`
+  (origem da abstração; seção 8 = mínimo viável provado por testes).
+- `~/projects/events/scripts/ralph-events.sh` + `ralph-codex-dispatch.sh`
+  (wrapper mais completo em produção local; específico do projeto events).
+
+## Fora de escopo desta fase
+
+- Publicar no GitHub / criar remote (decisão do dono: conta e visibilidade).
+- Rodar run real de validação com engine de verdade (quota + commits reais;
+  só manual, em branch descartável, quando o dono pedir).
+- Mudar gates, formato de fases ou mensagens de commit do motor.
+
+## Perguntas abertas para o humano
+
+1. Conta/visibilidade do repositório no GitHub (trocar `<seu-usuario>` no README).
+2. `./install-global.sh` nesta máquina agora, ou só após o primeiro run real?
+3. Na A3, a cadeia padrão deve ser só as engines instaladas detectadas em
+   runtime, ou fixa com erro alto se faltar um degrau?

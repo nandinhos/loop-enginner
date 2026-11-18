@@ -1,0 +1,150 @@
+# Loop Enginner
+
+Loops estruturados e autônomos sobre qualquer repositório Git: você escreve
+um documento de fases, o loop alimenta cada fase a uma sessão nova da engine
+(`codex` ou `claude`), valida o resultado por **4 gates mecânicos** e faz
+**1 commit por fase concluída** — sem perguntas do início ao fim e sem tocar
+em nenhum arquivo rastreado do seu projeto além do código que a própria
+sessão escreve.
+
+Fork agnóstico (MIT) do ralph-loop do bc-harness + painel de terminal
+“Loop Engineer” — origem e créditos no [NOTICE](NOTICE).
+
+> **Autonomia é perigosa por desenho.** As sessões rodam sem sandbox de
+> escrita (`codex --sandbox danger-full-access` /
+> `claude --dangerously-skip-permissions`). Rode em repo confiável, numa
+> **branch descartável**, com a árvore limpa. Um commit por fase significa
+> que `git revert`/`git reset` sempre volta atrás.
+
+## Instalação (via GitHub)
+
+Na máquina, uma vez:
+
+```bash
+git clone https://github.com/<seu-usuario>/loop-enginner.git
+cd loop-enginner
+./install-global.sh        # symlink ~/.local/bin/loop-enginner -> este repo
+loop-enginner doctor       # checa bash, git e engine no PATH
+```
+
+Atualizar é `git pull` (o comando é um symlink, nada é copiado).
+Tirar da máquina: `./install-global.sh --uninstall`.
+
+Pré-requisitos: `bash`, `git` e ao menos uma engine no PATH —
+[Codex](https://github.com/openai/codex) ou
+[Claude Code](https://claude.com/product/claude-code) — já logada.
+
+## Uso num projeto
+
+```bash
+cd meu-projeto
+loop-enginner install   # escreve so .loop-enginner/ + .git/info/exclude
+loop-enginner new       # cria .loop-enginner/PHASES.md do template; edite-o
+loop-enginner run       # arvore limpa, branch descartavel
+loop-enginner watch     # (outro terminal) painel ao vivo
+```
+
+Opções úteis do `run`: `--engine claude`, `--from 3`, `--max-cycles 5`,
+`--test-cmd "npm test"`, `--dashboard` (painel embutido),
+`--no-verify`. A lista completa: `loop-enginner run --help`.
+
+Sem argumento de entrada, o loop resolve nesta ordem:
+`.loop-enginner/PHASES.md` → `PHASES.md` na raiz → layouts legados
+`.spec/init/project-phases.md` / `.spec/project-phases.md`.
+Um caminho explícito também vale: `loop-enginner run docs/PHASES.md`.
+
+## O documento de fases
+
+```markdown
+## Phase 1: Fundacao
+
+- [ ] Primeira task verificavel
+- [ ] Segunda task, com teste
+
+## Phase 2: Evolucao
+
+- [ ] ...
+```
+
+Contrato: heading `## Phase N: <titulo>`; `### Phase N.M:` é sub-fase;
+qualquer outro `## ` encerra a fase; com o gate 3 ligado, toda fase precisa
+de ao menos uma task `- [ ]`. Cada fase roda em sessão **nova**: o texto
+precisa ser auto-contido (contexto, aceite, como testar). Modelo completo
+em [templates/PHASES.example.md](templates/PHASES.example.md).
+
+## Os 4 gates (por fase)
+
+| Gate | Pergunta | Quem decide |
+|---|---|---|
+| 0 | A engine terminou de verdade? | exit code / JSON da sessão |
+| 1 | A sessão escreveu código? | sinal, não veredito |
+| 2 | A suíte do projeto passa? | o loop, fora da sessão |
+| 3 | As tasks foram cumpridas? | sessão verificadora independente, read-only |
+
+Gate vermelho → ciclo de correção com a causa (default: 3). Limite de uso
+da engine → espera o reset e re-executa a **mesma** fase, sem consumir
+ciclo. Tudo verde → commit `feat(phase-N): <titulo>`; falha final →
+`wip(phase-N): incomplete` (formato herdado do loop original).
+
+O gate 2 detecta o comando pelo manifest (Sail, composer, artisan,
+package.json, pytest, go, cargo) ou usa `--test-cmd` /
+`LOOP_ENGINNER_TEST_CMD`. Referência completa de variáveis em
+[templates/config.env.example](templates/config.env.example).
+
+## O que vive no seu projeto (e como sai)
+
+Tudo fica em `.loop-enginner/`, ignorado via `.git/info/exclude`
+(**nunca** no seu `.gitignore`):
+
+```text
+.loop-enginner/
+  install.manifest    registro do que o install criou
+  PHASES.md           seu plano (criado por voce ou pelo 'new')
+  hook.sh             seu hook de eventos (opcional, chmod +x)
+  *.example.*         referencias copiadas pelo install
+  run/ state/ logs/ prompts/   runtime dos runs (descartavel)
+```
+
+Desinstalar a qualquer momento:
+
+```bash
+loop-enginner uninstall            # remove o nosso + runtime; preserva o seu
+loop-enginner uninstall --purge    # remove .loop-enginner/ inteiro
+```
+
+O uninstall é fail-closed: sem `install.manifest` ele não apaga nada no
+escuro (exceto com `--purge` explícito), e só remove a linha do
+`.git/info/exclude` se foi ele quem a adicionou. Depois de desinstalar,
+`git status` volta exatamente ao que era antes do install.
+
+## Painel e hook
+
+`loop-enginner watch` desenha o painel “Loop Engineer” a partir de
+`.loop-enginner/state/` (leitor puro — pode rodar em outro terminal ou
+embutido via `run --dashboard`). O estado é publicado em todo run, com ou
+sem painel.
+
+Eventos do run (`run_start`, `phase_done`, `gate_fail`, `limit_wait`, …)
+podem chamar `.loop-enginner/hook.sh` — modelo em
+[templates/hook.example.sh](templates/hook.example.sh).
+
+## Desenvolvimento
+
+```bash
+bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, run com mock
+```
+
+- `lib/loop.sh` e `lib/loop-watch.sh` são a fonte canônica;
+  `tools/fork-from-upstream.py` reproduz o fork a partir dos scripts
+  originais quando eles evoluírem (falha alto se um padrão sumir).
+- CI no GitHub Actions roda a mesma suíte.
+- Agentes (Antigravity e outros): comecem por [AGENTS.md](AGENTS.md) e
+  [docs/HANDOFF.md](docs/HANDOFF.md); estado atual em
+  [docs/STATUS.md](docs/STATUS.md), histórico em
+  [CHANGELOG.md](CHANGELOG.md).
+- Direção futura (adapters Antigravity/OpenCode no fallback):
+  [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Licença
+
+MIT — ver [LICENSE](LICENSE) e [NOTICE](NOTICE).

@@ -1,0 +1,30 @@
+Loop Enginner — NOTICE de origem e creditos
+
+Este projeto e um fork agnostico, sob licenca MIT (ver LICENSE), de:
+
+  - scripts/ralph.sh do bc-harness (Beer and Code) — o loop original de
+    fases com 4 gates mecanicos, Copyright (c) 2026 Beer and Code;
+  - a adaptacao local desse loop feita por nandodev (hook de eventos,
+    estado observavel em TSV, gate de plano, verificador tolerante);
+  - scripts/ralph-watch.sh — o painel de terminal "Loop Engineer"
+    (banner ANSI Shadow), tambem de nandodev.
+
+O que o fork mudou em relacao a essas fontes (nada alem disso):
+
+  1. nomes: ralph.sh -> lib/loop.sh, ralph-watch.sh -> lib/loop-watch.sh,
+     variaveis RALPH_* -> LOOP_ENGINNER_*, marcadores RALPH-TASK -> LOOP-TASK;
+  2. runtime: .phases/ -> .loop-enginner/, com os fragmentos de fase
+     isolados em .loop-enginner/run/ (o rm -rf do split de fases nunca
+     apaga hook, config ou o documento de fases do usuario);
+  3. hook de eventos: auto-descoberta em .loop-enginner/hook.sh
+     (antes: scripts/ralph-hook.sh dentro do projeto-alvo);
+  4. input: resolve .loop-enginner/PHASES.md, depois PHASES.md na raiz,
+     mantendo compatibilidade com os layouts .spec/ legados;
+  5. deteccao de processos do painel: somente loop.sh/loop-enginner e as
+     engines codex|claude (removidos nomes de projetos especificos);
+  6. preambulo das sessoes: documentos .spec/ viraram exemplo generico
+     (README/docs), nao contrato.
+
+A transformacao e mecanica e reproduzivel: tools/fork-from-upstream.py
+aplica exatamente as substituicoes acima sobre os arquivos-fonte e falha
+alto se algum padrao esperado nao for encontrado.
