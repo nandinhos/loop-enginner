@@ -1,27 +1,28 @@
 # STATUS — Loop Enginner
 
-Atualizado em 2026-11-18 · Versão: **0.1.0** (`VERSION`) · Branches: `main` / `dev`
+Atualizado em 2026-11-18 · Versão: **0.2.0** (`VERSION`) · Branches: `main` / `dev`
 
-## Feito e provado (evidência: `bash tests/run-tests.sh` → 3/3)
+## Feito e provado (evidência: `bash tests/run-tests.sh` → 4/4)
 
 | Área | Estado | Prova |
 |---|---|---|
 | Núcleo `lib/loop.sh` (fork agnóstico) | ✅ | `tests/test-loop-mock.sh`: run mock gera commit por fase |
-| Painel `lib/loop-watch.sh` | ✅ | mesmo teste: frame `--once` com banner e caixas |
+| Adapter Antigravity (`agy`) | ✅ | `tests/test-adapter-agy.sh` (impl + verify + batch + doctor/status) |
+| Painel `lib/loop-watch.sh` | ✅ | mesmo teste: frame `--once` com banner, caixas e `Provider:` |
 | CLI install/uninstall reversível | ✅ | `tests/test-install.sh`: árvore limpa antes/depois |
-| CLI new/run/watch/status/doctor/version | ✅ | `doctor` executado; `run`/`watch` cobertos pelo mock |
-| Sintaxe + shellcheck + desacoplamento | ✅ | `tests/test-syntax.sh` (grep anti-resíduo na lib) |
+| CLI new/run/watch/status/doctor/version | ✅ | `doctor` executado; `run`/`watch`/`status` cobertos pelos mocks |
+| Sintaxe + shellcheck + desacoplamento | ✅ | `tests/test-syntax.sh` (grep anti-resíduo na lib e adapters) |
 | Fork reproduzível | ✅ | `tools/fork-from-upstream.py` regerou a lib com hashes idênticos |
 | Install global (symlink) | ✅ provado em prefixo descartável | `PREFIX=/tmp/le-prefix ./install-global.sh` + doctor + `--uninstall` |
 | Repositório remoto (GitHub) | ✅ | `https://github.com/nandinhos/loop-enginner` (público, `main` e `dev`) |
 
 ## Não provado / não feito
 
-- **Run com engine real** (`codex`/`claude`): nunca executado neste fork.
+- **Run com engine real** (`codex`/`claude`/`agy`): nunca executado neste fork.
   Exige branch descartável, árvore limpa e quota — decisão manual do humano.
 - **Install global nesta máquina:** o symlink em `~/.local/bin` ainda não
   foi criado (proposital; `./install-global.sh` quando o humano quiser).
-- **Adapters Antigravity/OpenCode:** planejados, não implementados —
+- **Adapters OpenCode e cadeia de fallback:** planejados (Fases A2 e A3) —
   ver [ROADMAP.md](ROADMAP.md) e a tarefa detalhada em [HANDOFF.md](HANDOFF.md).
 
 ## Decisões fechadas (não reabrir sem o humano)
@@ -29,6 +30,6 @@ Atualizado em 2026-11-18 · Versão: **0.1.0** (`VERSION`) · Branches: `main` /
 1. Núcleo = **fork completo** no repo (não depende de instalação externa).
 2. Instalação em projeto = **clone global + install reversível** por
    manifest; nada copiado para dentro do projeto-alvo além de exemplos.
-3. Engines v0.1.0 = **`codex|claude`**, contrato herdado do loop original.
+3. Engines atuais = **`codex|claude|agy`** (com seam em `adapters/*.sh`).
 4. Nome/pasta = **`loop-enginner`** (grafia do dono); o banner visual
    continua “Loop Engineer”.

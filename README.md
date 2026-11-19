@@ -2,7 +2,7 @@
 
 Loops estruturados e autônomos sobre qualquer repositório Git: você escreve
 um documento de fases, o loop alimenta cada fase a uma sessão nova da engine
-(`codex` ou `claude`), valida o resultado por **4 gates mecânicos** e faz
+(`codex`, `claude` ou `agy`), valida o resultado por **4 gates mecânicos** e faz
 **1 commit por fase concluída** — sem perguntas do início ao fim e sem tocar
 em nenhum arquivo rastreado do seu projeto além do código que a própria
 sessão escreve.
@@ -12,7 +12,8 @@ Fork agnóstico (MIT) do ralph-loop do bc-harness + painel de terminal
 
 > **Autonomia é perigosa por desenho.** As sessões rodam sem sandbox de
 > escrita (`codex --sandbox danger-full-access` /
-> `claude --dangerously-skip-permissions`). Rode em repo confiável, numa
+> `claude --dangerously-skip-permissions` /
+> `agy --dangerously-skip-permissions`). Rode em repo confiável, numa
 > **branch descartável**, com a árvore limpa. Um commit por fase significa
 > que `git revert`/`git reset` sempre volta atrás.
 
@@ -31,8 +32,9 @@ Atualizar é `git pull` (o comando é um symlink, nada é copiado).
 Tirar da máquina: `./install-global.sh --uninstall`.
 
 Pré-requisitos: `bash`, `git` e ao menos uma engine no PATH —
-[Codex](https://github.com/openai/codex) ou
-[Claude Code](https://claude.com/product/claude-code) — já logada.
+[Codex](https://github.com/openai/codex),
+[Claude Code](https://claude.com/product/claude-code) ou
+Antigravity (`agy`) — já logada.
 
 ## Uso num projeto
 
@@ -44,7 +46,7 @@ loop-enginner run       # arvore limpa, branch descartavel
 loop-enginner watch     # (outro terminal) painel ao vivo
 ```
 
-Opções úteis do `run`: `--engine claude`, `--from 3`, `--max-cycles 5`,
+Opções úteis do `run`: `--engine claude` ou `--engine agy`, `--from 3`, `--max-cycles 5`,
 `--test-cmd "npm test"`, `--dashboard` (painel embutido),
 `--no-verify`. A lista completa: `loop-enginner run --help`.
 
@@ -137,12 +139,14 @@ bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, run com mock
 - `lib/loop.sh` e `lib/loop-watch.sh` são a fonte canônica;
   `tools/fork-from-upstream.py` reproduz o fork a partir dos scripts
   originais quando eles evoluírem (falha alto se um padrão sumir).
+- `adapters/` concentra os adapters de provider por contrato de sessão
+  (hoje `adapters/agy.sh` para `--engine agy`).
 - CI no GitHub Actions roda a mesma suíte.
 - Agentes (Antigravity e outros): comecem por [AGENTS.md](AGENTS.md) e
   [docs/HANDOFF.md](docs/HANDOFF.md); estado atual em
   [docs/STATUS.md](docs/STATUS.md), histórico em
   [CHANGELOG.md](CHANGELOG.md).
-- Direção futura (adapters Antigravity/OpenCode no fallback):
+- Direção futura (adapter OpenCode e cadeia de fallback):
   [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licença

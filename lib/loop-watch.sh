@@ -95,8 +95,8 @@ watch_process_count() {
         args[pid] ~ /(^|[[:space:]])loop-enginner([[:space:]]|$)/
     }
     function provider_process(pid) {
-      return (comm[pid] == "codex" || comm[pid] == "claude" ||
-        args[pid] ~ /(^|[[:space:]])(codex|claude)([[:space:]]|$)/ ||
+      return (comm[pid] == "codex" || comm[pid] == "claude" || comm[pid] == "agy" ||
+        args[pid] ~ /(^|[[:space:]])(codex|claude|agy)([[:space:]]|$)/ ||
         args[pid] ~ /codex-linux-x64/)
     }
     function has_loop_parent(pid, parent) {
@@ -610,8 +610,11 @@ draw_header() {
   printf -v tmp '%sStatus:%s %s' "$C_PRIMARY" "$C_RESET" "$(run_status_label)"
   L+=("$tmp"); printf -v tmp 'Status: %s' "$(run_status_plain)"; LP+=("$tmp")
 
+  local effective_provider="${META[provider]:-${META[engine]:-—}}"
   printf -v tmp '%sEngine:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "${META[engine]:-—}" "$C_RESET"
   R+=("$tmp"); printf -v tmp 'Engine: %s' "${META[engine]:-—}"; RP+=("$tmp")
+  printf -v tmp '%sProvider:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "$effective_provider" "$C_RESET"
+  R+=("$tmp"); printf -v tmp 'Provider: %s' "$effective_provider"; RP+=("$tmp")
   printf -v tmp '%sModelo:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "${META[model]:-—}" "$C_RESET"
   R+=("$tmp"); printf -v tmp 'Modelo: %s' "${META[model]:-—}"; RP+=("$tmp")
   printf -v tmp '%sEsforço:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_WARNING" "${META[reasoning_effort]:-—}" "$C_RESET"

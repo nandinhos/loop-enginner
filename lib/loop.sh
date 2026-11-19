@@ -4,7 +4,7 @@
 # no NOTICE, licenca MIT no LICENSE da raiz do projeto).
 #
 # Orquestrador que le um documento de fases, quebra em fases, e alimenta cada
-# uma ao Codex CLI ou Claude Code para implementacao automatica.
+# uma ao Codex CLI, Claude Code ou Antigravity (agy) para implementacao automatica.
 #
 # Invariantes:
 #   1. Cada fase E cada ciclo de correcao roda em sessao NOVA, com prompt
@@ -23,7 +23,7 @@
 #   ./loop.sh [opcoes] [caminho-do-arquivo]
 #
 # Opcoes:
-#   --engine codex|claude    engine de implementacao (default: codex)
+#   --engine codex|claude|agy  engine de implementacao (default: codex)
 #   --from N                 comeca na fase N (limpa do progresso as fases >= N)
 #   --keep-going             continua apos uma fase falhar (default: para)
 #   --max-cycles N           ciclos de correcao por fase (default: 3)
@@ -40,7 +40,7 @@
 #   No engine claude a sessao roda com --output-format stream-json, o que da
 #   progresso POR TASK em tempo real: o prompt manda o agente registrar uma
 #   tarefa por item `- [ ]` da fase, e o loop-enginner le essas transicoes do stream.
-#   No engine codex nao ha stream equivalente: a granularidade e por fase.
+#   No codex nao ha stream equivalente e o agy roda em batch: granularidade por fase.
 #
 # Input (primeiro arquivo posicional). Sem argumento, resolve nesta ordem:
 #   1. .loop-enginner/PHASES.md
@@ -57,7 +57,7 @@
 #   - qualquer outro `## ` encerra a captura da fase anterior
 #
 # Gates por fase (todos verdes -> commit; qualquer vermelho -> ciclo de correcao):
-#   0. engine terminou de verdade (claude: is_error no JSON; codex: exit code)
+#   0. engine terminou de verdade (claude: is_error no JSON; codex/agy: exit code)
 #   1. a sessao escreveu codigo? SINAL, nao veredito — uma fase ja implementada
 #      faz o engine (corretamente) nao escrever nada. Alimenta a causa do ciclo
 #      de correcao quando um gate posterior reprova.
@@ -98,9 +98,15 @@
 #   LOOP_ENGINNER_MAX_LIMIT_WAITS    esperas consecutivas por limite, por fase (default: 20)
 #   LOOP_ENGINNER_LIMIT_WAIT_DEFAULT fallback de espera em segundos (default: 1800)
 #   LOOP_ENGINNER_LIMIT_BUFFER       segundos extras apos o reset (default: 60)
+#   LOOP_ENGINNER_AGY_BIN            binario/comando do Antigravity (default: agy)
+#   LOOP_ENGINNER_AGY_MODEL          modelo opcional para --engine agy
+#   LOOP_ENGINNER_AGY_EFFORT         esforco opcional: low|medium|high|xhigh|max
+#   LOOP_ENGINNER_AGY_PRINT_TIMEOUT  timeout do agy --print (default: 30m)
+#   LOOP_ENGINNER_AGY_INACTIVITY_TIMEOUT limite de silencio do agy (default: herda PRINT_TIMEOUT)
 #
 # Exportadas para hooks (ex: hook de notificacao) durante cada sessao de engine:
-#   LOOP_ENGINNER_ENGINE             codex | claude
+#   LOOP_ENGINNER_ENGINE             codex | claude | agy
+#   LOOP_ENGINNER_PROVIDER           provider efetivo da sessao (ex: agy)
 #   LOOP_ENGINNER_PHASE_TITLE        titulo da fase corrente
 #   LOOP_ENGINNER_PHASE_NUM          numero da fase corrente
 #   LOOP_ENGINNER_PHASE_TOTAL        total de fases do run
@@ -119,9 +125,25 @@
 # Pre-requisitos:
 #   - Codex: npm install -g @openai/codex + OPENAI_API_KEY
 #   - Claude: npm install -g @anthropic-ai/claude-code + ANTHROPIC_API_KEY
+#   - Antigravity: agy CLI instalado e logado no PATH
 #   - Raiz de um repo git, com a arvore de trabalho limpa
 
 set -euo pipefail
+
+LOOP_HOME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ADAPTERS_DIR="$LOOP_HOME_DIR/adapters"
+
+is_adapter_engine() {
+  [[ "$1" =~ ^[a-z0-9_-]+$ ]] && [ -f "$ADAPTERS_DIR/$1.sh" ]
+}
+
+load_adapter() {
+  local name="$1"
+  local f="$ADAPTERS_DIR/$name.sh"
+  [ -f "$f" ] || return 1
+  # shellcheck source=/dev/null
+  source "$f"
+}
 
 ENGINE="codex"
 INPUT_FILE=""
@@ -456,8 +478,8 @@ resolve_test_cmd() {
 }
 
 preflight_checks() {
-  if [[ "$ENGINE" != "codex" && "$ENGINE" != "claude" ]]; then
-    fail "Engine invalida: $ENGINE. Use 'codex' ou 'claude'."
+  if [[ "$ENGINE" != "codex" && "$ENGINE" != "claude" ]] && ! is_adapter_engine "$ENGINE"; then
+    fail "Engine invalida: $ENGINE. Use 'codex', 'claude' ou 'agy'."
     exit 1
   fi
 
@@ -487,7 +509,14 @@ preflight_checks() {
     VERIFY_MODEL="sonnet"
   fi
 
-  if ! command -v "$ENGINE" &> /dev/null; then
+  if is_adapter_engine "$ENGINE"; then
+    load_adapter "$ENGINE" || { fail "Falha ao carregar adapter: $ENGINE"; exit 1; }
+    local check_err
+    if ! check_err=$("adapter_${ENGINE}_check" 2>&1); then
+      fail "$check_err"
+      exit 1
+    fi
+  elif ! command -v "$ENGINE" &> /dev/null; then
     if [[ "$ENGINE" == "codex" ]]; then
       fail "codex CLI nao encontrado. Instale com: npm install -g @openai/codex"
     else
@@ -732,12 +761,24 @@ state_init() {
   mkdir -p "$STATE_DIR"
   : > "$LIVE_STATE"
 
+  local meta_model meta_profile meta_effort
+  if is_adapter_engine "$ENGINE" && declare -F "adapter_${ENGINE}_meta" >/dev/null 2>&1; then
+    meta_model="$("adapter_${ENGINE}_meta" model)"
+    meta_profile="$("adapter_${ENGINE}_meta" profile)"
+    meta_effort="$("adapter_${ENGINE}_meta" reasoning_effort)"
+  else
+    meta_model="${LOOP_ENGINNER_CODEX_MODEL:-${CLAUDE_MODEL:-—}}"
+    meta_profile="${LOOP_ENGINNER_CODEX_PROFILE:-—}"
+    meta_effort="${LOOP_ENGINNER_CODEX_REASONING_EFFORT:-—}"
+  fi
+
   META=(
     [project]="$(basename "$(pwd)")"
     [engine]="$ENGINE"
-    [model]="${LOOP_ENGINNER_CODEX_MODEL:-${CLAUDE_MODEL:-—}}"
-    [profile]="${LOOP_ENGINNER_CODEX_PROFILE:-—}"
-    [reasoning_effort]="${LOOP_ENGINNER_CODEX_REASONING_EFFORT:-—}"
+    [provider]="$ENGINE"
+    [model]="$meta_model"
+    [profile]="$meta_profile"
+    [reasoning_effort]="$meta_effort"
     [verify_model]="${VERIFY_MODEL:-—}"
     [input]="$INPUT_FILE"
     [status]="running"
@@ -1442,6 +1483,7 @@ run_engine() {
   local prompt_file="$1" log_file="$2" mode="$3"
 
   export LOOP_ENGINNER_ENGINE="$ENGINE"
+  export LOOP_ENGINNER_PROVIDER="$ENGINE"
   export LOOP_ENGINNER_PHASE_MAX_ATTEMPTS="$MAX_CYCLES"
 
   local model_args=()
@@ -1467,7 +1509,7 @@ run_engine() {
           rc=$?
         fi
       fi
-    else
+    elif [[ "$ENGINE" == "claude" ]]; then
       # < /dev/null: claude -p le stdin quando nao e TTY. Sem o redirect ele
       # consome o stream de quem chamou (ex: o manifest do loop de fases).
       if [[ "$mode" == "verify" ]]; then
@@ -1493,10 +1535,29 @@ run_engine() {
           rc=$?
         fi
       fi
+    else
+      if [[ "$mode" == "verify" ]]; then
+        "adapter_${ENGINE}_run" verify "$prompt_file" "$VERIFY_MODEL" | tee "$log_file" || rc=$?
+      else
+        local quiet=0
+        $DASHBOARD && quiet=1
+        if "adapter_${ENGINE}_run" impl "$prompt_file" "" \
+             | tee "$log_file" \
+             | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
+          rc=0
+        else
+          rc=$?
+        fi
+      fi
     fi
 
     local reset_epoch
-    if reset_epoch=$(detect_usage_limit "$log_file"); then
+    if is_adapter_engine "$ENGINE"; then
+      if [ "$rc" -ne 0 ] && reset_epoch=$(detect_usage_limit "$log_file"); then
+        wait_for_reset "$reset_epoch"
+        continue
+      fi
+    elif reset_epoch=$(detect_usage_limit "$log_file"); then
       wait_for_reset "$reset_epoch"
       continue
     fi
@@ -1535,6 +1596,9 @@ gate0_engine_finished() {
       GATE_CAUSE="O engine reportou is_error=true no resultado. Ultimas linhas do output:"$'\n'"$(tail -n 40 "$log_file")"
       return 1
     fi
+  elif is_adapter_engine "$ENGINE" && declare -F "adapter_${ENGINE}_gate0" >/dev/null 2>&1; then
+    "adapter_${ENGINE}_gate0" "$log_file" "$rc"
+    return $?
   fi
 
   if [ "$rc" -ne 0 ]; then

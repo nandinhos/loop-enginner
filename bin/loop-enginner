@@ -32,6 +32,7 @@ resolve_home() {
 
 HOME_DIR="$(resolve_home)"
 LIB_DIR="$HOME_DIR/lib"
+ADAPTERS_DIR="$HOME_DIR/adapters"
 TEMPLATES_DIR="$HOME_DIR/templates"
 VERSION_FILE="$HOME_DIR/VERSION"
 
@@ -311,15 +312,18 @@ cmd_status() {
   else
     printf 'install:  nao (rode: loop-enginner install)\n'
   fi
-  printf 'engines:  codex=%s claude=%s\n' \
+  local agy_bin="${LOOP_ENGINNER_AGY_BIN:-agy}"
+  printf 'engines:  codex=%s claude=%s agy=%s\n' \
     "$(command -v codex 2>/dev/null || printf 'ausente')" \
-    "$(command -v claude 2>/dev/null || printf 'ausente')"
+    "$(command -v claude 2>/dev/null || printf 'ausente')" \
+    "$(command -v "$agy_bin" 2>/dev/null || printf 'ausente')"
   local run_tsv="$dir/state/run.tsv"
   if [ -f "$run_tsv" ]; then
-    local st ph
+    local st ph prov
     st="$(awk -F'\t' '$1=="META" && $2=="status" {v=$3} END {print v}' "$run_tsv")"
     ph="$(awk -F'\t' '$1=="META" && $2=="phase_cur" {v=$3} END {print v}' "$run_tsv")"
-    printf 'ultimo run: status=%s fase=%s (detalhe: loop-enginner watch --once)\n' "${st:-?}" "${ph:-?}"
+    prov="$(awk -F'\t' '$1=="META" && $2=="provider" {p=$3} $1=="META" && $2=="engine" {e=$3} END {print (p != "" ? p : e)}' "$run_tsv")"
+    printf 'ultimo run: status=%s fase=%s provider=%s (detalhe: loop-enginner watch --once)\n' "${st:-?}" "${ph:-?}" "${prov:-?}"
   else
     printf 'ultimo run: nenhum estado em .loop-enginner/state/\n'
   fi
@@ -342,10 +346,17 @@ cmd_doctor() {
     || { printf '  FALTA   lib/loop.sh executavel\n'; fails=$((fails + 1)); }
   [ -x "$LIB_DIR/loop-watch.sh" ] && printf '  ok      lib/loop-watch.sh executavel\n' \
     || { printf '  FALTA   lib/loop-watch.sh executavel\n'; fails=$((fails + 1)); }
-  if command -v codex >/dev/null 2>&1 || command -v claude >/dev/null 2>&1; then
-    printf '  ok      ao menos uma engine (codex|claude) no PATH\n'
+  [ -f "$ADAPTERS_DIR/agy.sh" ] && printf '  ok      adapters/agy.sh presente\n' \
+    || { printf '  FALTA   adapters/agy.sh presente\n'; fails=$((fails + 1)); }
+  local -a found_engines=()
+  local agy_bin="${LOOP_ENGINNER_AGY_BIN:-agy}"
+  command -v codex >/dev/null 2>&1 && found_engines+=(codex)
+  command -v claude >/dev/null 2>&1 && found_engines+=(claude)
+  command -v "$agy_bin" >/dev/null 2>&1 && found_engines+=(agy)
+  if [ "${#found_engines[@]}" -gt 0 ]; then
+    printf '  ok      engines no PATH: %s\n' "${found_engines[*]}"
   else
-    printf '  FALTA   engine codex ou claude no PATH\n'
+    printf '  FALTA   nenhuma engine (codex|claude|agy) no PATH\n'
     fails=$((fails + 1))
   fi
   if command -v shellcheck >/dev/null 2>&1; then

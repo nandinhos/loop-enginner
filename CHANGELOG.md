@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v0.2.0 — 2026-11-18
+
+Fase A1 — Adapter Antigravity (`agy`) atrás da seam `adapters/`:
+
+- `adapters/agy.sh`: adapter de provider para `agy` com modo `impl`
+  (`--dangerously-skip-permissions`), modo `verify` read-only (`--mode plan --sandbox`),
+  configuração via `LOOP_ENGINNER_AGY_*` e metadado de timeout por provider em modo `batch`
+  (`LOOP_ENGINNER_AGY_INACTIVITY_TIMEOUT` herdando `LOOP_ENGINNER_AGY_PRINT_TIMEOUT`).
+- `lib/loop.sh`: descoberta e carregamento de `adapters/*.sh`, suporte a
+  `--engine agy`, guarda de exit code para não disparar espera de limite em
+  sessão bem-sucedida e emissão de `provider` / `LOOP_ENGINNER_PROVIDER` em `run.tsv` e hooks.
+- `lib/loop-watch.sh`: exibição do campo `Provider:` na caixa `ENGINE` e
+  detecção de processos `agy`.
+- `bin/loop-enginner`: `doctor` valida `adapters/agy.sh` e detecta `codex|claude|agy`
+  no `PATH`; `status` exibe `agy` e o `provider` do último run.
+- `tests/test-adapter-agy.sh` e `tests/test-syntax.sh`: cobertura com mock de
+  `impl` + Gate 2 + Gate 3, `doctor`/`status`, timeout `batch` e unhappy paths.
+- `templates/config.env.example`: variáveis `LOOP_ENGINNER_AGY_*` documentadas.
+
 ## v0.1.0 — 2026-11-18
 
 Primeira versão: fork agnóstico do ralph-loop do bc-harness + painel

@@ -1,39 +1,39 @@
 # HANDOFF — continuação via Antigravity (agy)
 
-Gerado em 2026-11-18, sobre o commit inicial deste repo (v0.1.0).
+Gerado em 2026-11-18, atualizado na Fase A1 (v0.2.0).
 Destinatário: próximo agente (Antigravity) e o humano que o conduz.
 
 ## Como retomar em 2 minutos
 
 ```bash
 cd loop-enginner
-bash tests/run-tests.sh        # baseline: 3 passaram, 0 falharam
+bash tests/run-tests.sh        # baseline: 4 passaram, 0 falharam
 agy
 ```
 
 Primeiro prompt sugerido no agy:
 
 ```text
-/goal Leia AGENTS.md, docs/STATUS.md e docs/HANDOFF.md. Execute a Fase A1
-(adapter Antigravity) respeitando as invariantes do AGENTS.md: baseline
-verde antes e depois, testes somente com mock, commits em pt-BR sem
-Co-Authored-By. Pare e pergunte se alguma decisao fechada precisar mudar.
+/goal Leia AGENTS.md, docs/STATUS.md e docs/HANDOFF.md. Execute a Fase A2
+(adapter OpenCode) respeitando as invariantes do AGENTS.md e o contrato da
+seam adapters/ estabelecido na A1: baseline verde antes e depois, testes
+somente com mock, commits em pt-BR sem Co-Authored-By. Pare e pergunte se
+alguma decisao fechada precisar mudar.
 ```
 
 Se preferir validar o entendimento antes: troque `/goal` por `/grill-me`.
 
 ## Onde paramos
 
-O projeto nasceu em uma sessão de varredura + construção: a adaptação
-original (`ralph.sh` modificado + `ralph-watch.sh` com o banner
-“Loop Engineer”) vivia só na instalação do bc-harness em
-`~/.claude-profiles/bc/plugins/marketplaces/beer-and-code/scripts/` e foi
-forkada para cá, desacoplada e empacotada. Estado e provas detalhadas em
-[STATUS.md](STATUS.md); transformações exatas no `NOTICE`.
+O projeto nasceu como fork agnóstico e desacoplado do `ralph.sh` + `ralph-watch.sh`
+(detalhes em [STATUS.md](STATUS.md) e `NOTICE`). Na **Fase A1 (v0.2.0)** foi
+criada a seam `adapters/` e entregue o adapter **Antigravity (`agy`)** em
+`adapters/agy.sh`, integrado a `lib/loop.sh`, `lib/loop-watch.sh`, `bin/loop-enginner`
+(`doctor` e `status`) e coberto por `tests/test-adapter-agy.sh` com mock.
 
 Repositório remoto publicado em `https://github.com/nandinhos/loop-enginner.git`
-(público, branches `main` e `dev`); ainda sem install global nesta máquina
-e sem run com engine real neste fork.
+(público, branches `main` e `dev`, topologia Clássico `dev -> main`); ainda sem
+install global nesta máquina e sem run com engine real neste fork.
 
 ## Próxima tarefa — Fase A: adapters de provider no fallback
 
@@ -42,26 +42,25 @@ Objetivo (pedido do dono): incluir **Antigravity (`agy`)** e
 a cadeia de fallback do loop. Ordem sugerida, um adapter por vez, cada um
 com seus testes antes do próximo:
 
-### A1 — Adapter Antigravity (`agy`)
+### A1 — Adapter Antigravity (`agy`) — ✅ Concluída (v0.2.0)
 
-- Desenhar a seam mínima: hoje `lib/loop.sh` conhece `--engine codex|claude`
-  e invoca a CLI em `run_engine()` (≈ linha 1440). O adapter novo entra
-  atrás do **mesmo contrato de sessão**: prompt auto-contido entra, a
-  sessão escreve código, gate 0 continua sendo exit/stream — nunca o
-  exit code decidindo sozinho além do gate 0.
-- Investigar antes de codar (comando real, nesta máquina): como o `agy`
-  roda headless/batch (`agy --print` é BATCH — processa e imprime no fim),
-  formato de saída, timeout e como os marcadores `LOOP-TASK` atravessam.
-- **Lição herdada (não repetir):** no ecossistema do dono, um vigia de
-  progresso por "houve saída" já matou o `agy --print` duas vezes
-  (2026-09-06) porque batch fica em silêncio legítimo. Qualquer vigia/
-  timeout de inatividade tem que ser **por provider**, nunca global.
+- Seam mínima criada em `adapters/*.sh` com contrato
+  `adapter_<nome>_{check,meta,run,gate0}` atrás de `lib/loop.sh` (`is_adapter_engine`,
+  `load_adapter`, `run_engine`, `gate0_engine_finished`, `state_init`).
+- `adapters/agy.sh` invoca `agy` em modo batch (`--output-format text`,
+  `--print-timeout` default `30m`, `--print="<prompt>"`, `--dangerously-skip-permissions`
+  em `impl`, `--mode plan --sandbox` em `verify`), com `LOOP_ENGINNER_AGY_INACTIVITY_TIMEOUT`
+  por provider (herdando `LOOP_ENGINNER_AGY_PRINT_TIMEOUT`) e guarda de exit code
+  para não disparar espera por limite em saída 0.
+- `bin/loop-enginner` (`doctor`/`status`), `lib/loop-watch.sh` (`Provider:` e
+  `provider_process`), `tests/test-syntax.sh` e `tests/test-adapter-agy.sh` verdes (`4/4`).
 
-### A2 — Adapter OpenCode (`opencode`)
+### A2 — Adapter OpenCode (`opencode`) — próxima
 
-- Mesmo contrato da A1. Investigar `opencode run` headless, formato de
-  saída/stream e seleção de modelo por variável de ambiente.
-- Só começar depois da A1 verde e commitada.
+- Mesmo contrato da A1 (`adapters/opencode.sh` com `check/meta/run/gate0`).
+  Investigar `opencode run` headless, formato de saída/stream, modo read-only
+  no `verify` e seleção de modelo por variável de ambiente (`LOOP_ENGINNER_OPENCODE_*`).
+- Manter timeout de inatividade por provider e guarda de exit code.
 
 ### A3 — Cadeia de fallback configurável
 
