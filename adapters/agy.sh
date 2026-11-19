@@ -18,6 +18,31 @@ adapter_agy_bin() {
   printf '%s' "${LOOP_ENGINNER_AGY_BIN:-agy}"
 }
 
+adapter_agy_models() {
+  local bin models=() line
+  bin="$(adapter_agy_bin)"
+  if command -v "$bin" >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && models+=("$line")
+    done < <("$bin" models 2>/dev/null | tr -d '\r' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | grep -v 'Fetching available models' | awk '{print $1}')
+  fi
+  if [ "${#models[@]}" -eq 0 ]; then
+    models=(
+      "gemini-3.8-flash-high"
+      "gemini-3.8-flash-medium"
+      "gemini-3.8-flash-low"
+      "claude-sonnet-4-6"
+      "claude-opus-4-6-thinking"
+      "gpt-oss-120b-medium"
+    )
+  fi
+  printf '%s\n' "${models[@]}"
+}
+
+adapter_agy_efforts() {
+  printf '%s\n' "low" "medium" "high" "xhigh" "max"
+}
+
 adapter_agy_check() {
   local bin timeout inactivity effort
   bin="$(adapter_agy_bin)"

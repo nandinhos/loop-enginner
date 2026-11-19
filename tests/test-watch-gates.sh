@@ -153,3 +153,44 @@ out_nolog="$(LOOP_ENGINNER_WATCH_COLS=120 LOOP_ENGINNER_WATCH_LINES=40 \
 assert_contains "$out_nolog" "aguardando saída da sessão atual" "placeholder de log ausente"
 assert_contains "$out_nolog" "GATES (FASE 1)" "GATES sumiu quando arquivo de log nao existia"
 printf 'ok: --once sem log preserva rodape dividido e exibe visor de gates\n'
+
+# Cenario 5: Enquadramento vertical W=140, H=41 sem estouro de tela e com barra de progresso nos gates
+cat > "$REPO/.loop-enginner/state/run.tsv" <<'EOF'
+META	project	loop-enginner-demo
+META	engine	agy
+META	provider	agy
+META	model	gemini-3.8-flash-high
+META	reasoning_effort	high
+META	profile	—
+META	status	running
+META	started	1700000000
+META	pid	2277673
+META	run	run-1119-005954-2277673
+META	cycle_max	3
+META	test_cmd	bash test.sh
+META	phase_cur	1
+META	cycle	1
+META	gate	G0
+META	activity	executando sessao do engine (agy)
+META	last_error	
+PHASE	1	running	1	run pending pending pending	Adicionar operacao sub (subtracao)
+TASK	1	1	running	Implementar o subcomando sub em calc.sh
+TASK	1	2	pending	Adicionar teste para sub em test.sh
+PHASE	2	pending	0	pending pending pending pending	Adicionar operacao mul (multiplicacao)
+EOF
+
+out_140="$(LOOP_ENGINNER_WATCH_COLS=140 LOOP_ENGINNER_WATCH_LINES=41 \
+  bash "$WATCH" --once --no-color "$REPO" 2>/dev/null)" || fail "watch --once W=140 H=41 falhou"
+assert_contains "$out_140" "Progresso: [" "barra de progresso dos gates ausente"
+assert_contains "$out_140" "G0 Engine" "G0 Engine ausente"
+assert_contains "$out_140" "└" "borda inferior do painel ausente"
+assert_max_width "$out_140" 140 "W=140"
+
+# O painel nao pode gerar indicador de rolagem de tabela quando as 3 tasks cabem
+if printf '%s\n' "$out_140" | grep -q 'rolagem manual'; then
+  fail "indicador de rolagem manual presente mesmo cabendo todas as tasks na tela"
+fi
+if printf '%s\n' "$out_140" | grep -q 'acima ·'; then
+  fail "tabela sofreu paginacao/corte vertical desnecessario em W=140 H=41"
+fi
+printf 'ok: enquadramento W=140 H=41 sem corte vertical e com barra de progresso dos gates\n'

@@ -42,16 +42,18 @@ Antigravity (`agy`) ou OpenCode (`opencode`) — já logada.
 ```bash
 cd meu-projeto
 loop-enginner install   # escreve so .loop-enginner/ + .git/info/exclude
+loop-enginner config    # menu interativo: escolhe engine, modelos, esforço e testes
 loop-enginner new       # cria .loop-enginner/PHASES.md do template; edite-o
 loop-enginner run       # arvore limpa, branch descartavel (supervisor ativo por padrao)
 loop-enginner pause     # pausa graciosamente ao fim da fase/ciclo atual
 loop-enginner resume    # retoma run pausado/falho limpando so a fase incompleta
 loop-enginner report    # exibe e salva relatorio detalhado pos-execucao
-loop-enginner watch     # (outro terminal) painel ao vivo
+loop-enginner watch     # (outro terminal) painel ao vivo com visor de gates e progresso
 ```
 
-Opções úteis do `run`: `--engine claude`, `--engine agy` ou `--engine opencode`,
-`--fallback-chain auto` (ou `"codex agy opencode"`), `--from 3`, `--max-cycles 5`,
+Opções úteis do `run`: `--engine agy` (ou `opencode`/`codex`/`claude`), `--model <nome>`,
+`--effort <low|medium|high|xhigh|max>`, `--menu` (configuração interativa antes de iniciar),
+`--fallback-chain auto` (ou `"agy opencode codex"`), `--from 3`, `--max-cycles 5`,
 `--test-cmd "npm test"`, `--dashboard` (painel embutido), `--resume`,
 `--no-supervise` (desliga retomada automática pós-falha), `--no-verify`.
 A lista completa: `loop-enginner run --help`.

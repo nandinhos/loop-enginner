@@ -1,6 +1,27 @@
 # CHANGELOG
 
-## v0.5.0 — 2026-11-19
+## v0.6.0 — 2026-11-19
+
+Fase C — Enquadramento responsivo do painel, barras de progresso nos gates, descoberta de modelos/esforço e menu de configuração prévia:
+
+- `lib/loop-watch.sh`:
+  - Enquadramento vertical adaptativo: banner com altura dinâmica ($H<34$ linha única, $34 \le H < 48$ conciso sem linhas em branco extras, $H \ge 48$ full), orçamento dinâmico entre tabela e rodapé evitando paginação artificial quando as tarefas cabem na tela, e trava de `scroll_by` quando $MAX\_OFF = 0$ (eliminando auto-scroll do terminal e pulo de tela por mouse wheel).
+  - Alinhamento da tabela: largura corrigida para exatos $W-1$ colunas (em linha com os boxes superiores e inferiores), eliminando quebra de linha espúria na borda direita.
+  - Barras de progresso nos gates: barra visual `Progresso: [████████░░░░] 50% (2/4)` no painel `GATES (FASE N)`.
+- `adapters/agy.sh` e `adapters/opencode.sh`:
+  - Funções de descoberta dinâmica de modelos (`adapter_agy_models`, `adapter_opencode_models`) com chamada live às CLIs (`agy models`, `opencode models`) e contingência integrada.
+  - Consulta de níveis de esforço de raciocínio no Antigravity (`adapter_agy_efforts`: `low`, `medium`, `high`, `xhigh`, `max`).
+- `bin/loop-enginner`:
+  - Novo comando `loop-enginner config`: assistente interativo em 5 passos (ou via flags de linha de comando) para escolha de engine, modelo, esforço de raciocínio, cadeia de fallback e comando de testes, persistindo em `.loop-enginner/config.env`.
+  - Flags `--menu`, `-i` e `--config` no `loop-enginner run` para invocar a configuração prévia antes de iniciar o loop.
+  - Subcomando `status` exibe as variáveis configuradas em `config.env`.
+  - `run` suporta `--target DIR` diretamente.
+- `lib/loop.sh`:
+  - Carregamento automático de `.loop-enginner/config.env` se presente no início do run.
+  - Suporte a flags de linha de comando `--model <nome>` e `--effort <nivel>`, com precedência sobre o `config.env`.
+- `tests/test-config.sh`: nova suíte cobrindo criação não-interativa de `config.env`, status, repasse de modelo/esforço no `run`, sobrescrita via flags de CLI e preservação no uninstall.
+- `tests/test-watch-gates.sh`: cenário adicional validando enquadramento vertical exato em $W=140, H=41$ sem estouro de linhas e com barra de progresso.
+
 
 Fase B — Visibilidade de gates, debug sistemático, retomada segura, pausa graciosa, supervisor e relatório pós-conclusão:
 

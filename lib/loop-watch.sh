@@ -616,7 +616,13 @@ draw_header() {
   [ "${META[status]:-running}" != "running" ] && [ -n "${META[ended]:-}" ] \
     && elapsed=$(( ${META[ended]} - ${META[started]:-$now} ))
 
-  printf '\n%s%s%s%s\n\n' "$C_BOLD" "$C_CYAN" "$(banner_centered)" "$C_RESET"
+  if [ "$H" -lt 34 ]; then
+    printf '%s%s══ LOOP ENGINEER ══%s\n' "$C_BOLD" "$C_CYAN" "$C_RESET"
+  elif [ "$H" -lt 48 ]; then
+    printf '%s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$(banner_centered)" "$C_RESET"
+  else
+    printf '\n%s%s%s%s\n\n' "$C_BOLD" "$C_CYAN" "$(banner_centered)" "$C_RESET"
+  fi
 
   local lw=$(( (W - 1) / 2 )) rw=$(( W - ((W - 1) / 2) - 2 ))
   local li=$(( lw - 2 )) ri=$(( rw - 2 ))
@@ -764,7 +770,7 @@ build_rows() {
   # c_gates=19 cabe "G0 ✓ G1 ✓ G2 ✓ G3 ✓" inteiro; c_status=18 cabe o rotulo
   # mais longo ("✓ Concluída (*)"). Encolher qualquer um deles corta a informacao.
   COL_ID=4; COL_STATUS=18; COL_TRY=9; COL_GATES=19
-  COL_NAME=$(( W - COL_ID - COL_STATUS - COL_TRY - COL_GATES - 16 ))
+  COL_NAME=$(( W - COL_ID - COL_STATUS - COL_TRY - COL_GATES - 17 ))
   [ "$COL_NAME" -lt 16 ] && COL_NAME=16
 
   local V="${C_BORDER}│${C_RESET}"
@@ -876,38 +882,52 @@ build_frame() {
   calc_height
   build_rows
 
-  # Reserva o rodape dividido (LOGS RECENTES | GATES) quando a janela comporta
-  # a informacao sem sacrificar a leitura minima da tabela.
-  LOG_PANEL_LINES=13
-  [ "$H" -lt 24 ] && LOG_PANEL_LINES=7
-  [ "$H" -lt 20 ] && LOG_PANEL_LINES=0
-
   HEAD=$(draw_header; draw_panels)
   TOTAL=${#ROWS[@]}
 
-  local head_n note_n=0 avail
-  # `| wc -l` custa um fork, mas contar em bash puro sai MAIS caro: a
-  # substituicao ${HEAD//[^$'\n']/} avalia a classe caractere a caractere e
-  # mediu 44ms contra 2ms do wc num HEAD de 2KB. Fork nao e sempre o vilao.
+  local head_n note_n=0 budget table_full
   head_n=$(printf '%s\n' "$HEAD" | wc -l)
   [ -n "${META[note]:-}" ] && note_n=2
 
-  # 4 = topo, cabecalho de coluna, separador e rodape da tabela.
-  # 1 = folga da ultima linha, que o terminal usaria para rolar o frame.
-  avail=$(( H - head_n - 4 - note_n - LOG_PANEL_LINES - 1 ))
-  [ "$avail" -lt 3 ] && avail=3
+  # Orcamento vertical disponivel para Tabela + Paineis Inferiores
+  budget=$(( H - head_n - note_n - 1 ))
+  [ "$budget" -lt 8 ] && budget=8
 
-  # --once e um dump: so recorta se a altura foi fixada de proposito.
-  if { $ONCE && [ -z "${LOOP_ENGINNER_WATCH_LINES:-}" ]; } || [ "$TOTAL" -le "$avail" ]; then
+  # Tabela completa (4 linhas de moldura/cabecalho + total de tarefas)
+  table_full=$(( TOTAL + 4 ))
+
+  # Se todas as tarefas cabem deixando espaco para os paineis inferiores (>= 6 linhas),
+  # exibe a tabela inteira sem rolagem, sem rodape de corte e sem estourar a tela.
+  if [ $(( table_full + 6 )) -le "$budget" ] || { $ONCE && [ -z "${LOOP_ENGINNER_WATCH_LINES:-}" ]; }; then
     VIS=$TOTAL; MAX_OFF=0; FOOTER=0; OFF=0
+    LOG_PANEL_LINES=$(( budget - table_full ))
+    [ "$LOG_PANEL_LINES" -gt 13 ] && LOG_PANEL_LINES=13
+    [ "$H" -lt 24 ] && [ "$LOG_PANEL_LINES" -gt 7 ] && LOG_PANEL_LINES=7
+    [ "$H" -lt 20 ] && LOG_PANEL_LINES=0
     return
   fi
 
+  # Caso a tabela nao caiba inteira: divide o orcamento entre paineis e linhas visiveis
+  if [ "$budget" -ge 16 ]; then
+    LOG_PANEL_LINES=9
+  elif [ "$budget" -ge 12 ]; then
+    LOG_PANEL_LINES=7
+  elif [ "$budget" -ge 8 ]; then
+    LOG_PANEL_LINES=5
+  else
+    LOG_PANEL_LINES=0
+  fi
+  [ "$H" -lt 20 ] && LOG_PANEL_LINES=0
+
+  # 5 = topo, cabecalho de coluna, separador, rodape da tabela e linha de scroll
+  local avail=$(( budget - LOG_PANEL_LINES - 5 ))
+  [ "$avail" -lt 3 ] && avail=3
+  [ "$avail" -gt "$TOTAL" ] && avail=$TOTAL
+
   FOOTER=1
-  VIS=$(( avail - 1 ))
-  [ "$VIS" -lt 3 ] && VIS=3
-  [ "$VIS" -gt "$TOTAL" ] && VIS=$TOTAL
+  VIS=$avail
   MAX_OFF=$(( TOTAL - VIS ))
+  [ "$MAX_OFF" -lt 0 ] && MAX_OFF=0
   if $FOLLOW; then follow_offset; else clamp_off; fi
 }
 
@@ -1171,16 +1191,38 @@ collect_gate_rows() { # <rows> <inner_width>
   # shellcheck disable=SC2206
   local -a g=( $spec )
   local i row active_txt="" failed_txt="" st
+  local passes=0 runs=0 fails=0 skips=0
   for i in 0 1 2 3; do
     st="${g[$i]:-pending}"
     build_gate_rendered_row row "$width" "$i" "$st"
     BOTTOM_R_RENDERED+=("$row")
-    [ "$st" = "run" ] && active_txt="$(gate_short_name "$i") (em curso)"
+    [ "$st" = "pass" ] && passes=$(( passes + 1 ))
+    [ "$st" = "run" ]  && runs=$(( runs + 1 ))
+    [ "$st" = "fail" ] && fails=$(( fails + 1 ))
+    [ "$st" = "skip" ] && skips=$(( skips + 1 ))
+    [ "$st" = "run" ]  && active_txt="$(gate_short_name "$i") (em curso)"
     [ "$st" = "fail" ] && failed_txt="$(gate_short_name "$i") (falhou)"
   done
 
-  local flow_p flow_c sum_p sum_c err_p err_c sup_p sup_c
+  # Barra de progresso dos gates da fase atual
   if [ "$max_rows" -ge 6 ]; then
+    local g_bar g_pct g_rendered p_pad pad_len g_bw text_w
+    g_bw=$(( width - 26 ))
+    [ "$g_bw" -lt 6 ] && g_bw=6
+    [ "$g_bw" -gt 16 ] && g_bw=16
+    bar_v g_bar "$passes" 4 "$g_bw"
+    pct_v g_pct "$passes" 4
+    text_w=$(( 20 + g_bw + ${#g_pct} ))
+    pad_len=$(( width - text_w ))
+    [ "$pad_len" -lt 0 ] && pad_len=0
+    repeat_v p_pad ' ' "$pad_len"
+    printf -v g_rendered '%sProgresso:%s [%s] %s%s%s (%d/4)%s' \
+      "$C_PRIMARY" "$C_RESET" "$g_bar" "$C_CYAN" "$g_pct" "$C_RESET" "$passes" "$p_pad"
+    BOTTOM_R_RENDERED+=("$g_rendered")
+  fi
+
+  local flow_p flow_c sum_p sum_c err_p err_c sup_p sup_c
+  if [ "$max_rows" -ge 7 ]; then
     pad_v flow_p 'Fluxo: G0→G1→G2→G3 (commit só se verdes)' "$width"
     BOTTOM_R_RENDERED+=("${C_MUTED}${flow_p}${C_RESET}")
   fi
@@ -1272,7 +1314,7 @@ draw_bottom_panels() {
   local bwidth=$(( panel_width - 4 ))
   collect_gate_rows 5 "$bwidth" "$target"
   draw_single_bottom_box "$g_title" "$bwidth" "$pinner" "${BOTTOM_R_RENDERED[@]}"
-  if [ "$LOG_PANEL_LINES" -ge 13 ]; then
+  if [ "$LOG_PANEL_LINES" -ge 7 ] || [ "$H" -ge 28 ]; then
     collect_log_rows 4 "$bwidth"
     draw_single_bottom_box 'LOGS RECENTES' "$bwidth" "$pinner" "${BOTTOM_L_RENDERED[@]}"
   fi
@@ -1345,6 +1387,7 @@ open_keyboard() {
 }
 
 scroll_by() { # <delta em linhas>
+  [ "${MAX_OFF:-0}" -gt 0 ] || return 0
   FOLLOW=false
   OFF=$(( OFF + $1 ))
   clamp_off
@@ -1471,8 +1514,10 @@ main() {
         printf '\033[2J'
         LAST_W=$W; LAST_H=$H; RESIZED=false
       fi
-      # Nunca imprime mais linhas do que a tela tem: ver clamp_lines.
-      clamp_lines frame "$frame" "$H"
+      # Nunca imprime mais linhas do que a tela tem: H - 1 evita auto-scroll no terminal
+      local clamp_target=$H
+      [ "$H" -gt 6 ] && clamp_target=$(( H - 1 ))
+      clamp_lines frame "$frame" "$clamp_target"
       # \033[K no INICIO de cada linha: \033[J so limpa do fim do frame para
       # baixo, entao uma linha nova mais curta que a antiga deixava o rabo dela
       # na tela e uma linha nova EM BRANCO nao apagava nada. O cabecalho alterna

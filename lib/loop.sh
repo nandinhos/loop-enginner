@@ -24,6 +24,8 @@
 #
 # Opcoes:
 #   --engine codex|claude|agy|opencode  engine de implementacao (default: codex)
+#   --model <nome>           modelo para a engine selecionada (sobrescreve config.env)
+#   --effort <nivel>         esforco de raciocinio (low|medium|high|xhigh|max)
 #   --from N                 comeca na fase N (limpa do progresso as fases >= N)
 #   --keep-going             continua apos uma fase falhar (default: para)
 #   --max-cycles N           ciclos de correcao por fase (default: 3)
@@ -166,7 +168,15 @@ load_adapter() {
 # shellcheck source=/dev/null
 source "$LOOP_HOME_DIR/lib/fallback.sh"
 
-ENGINE="codex"
+# Carrega configuracoes persistidas do projeto se presentes (.loop-enginner/config.env)
+if [ -f ".loop-enginner/config.env" ]; then
+  # shellcheck disable=SC1091
+  set -a
+  source ".loop-enginner/config.env"
+  set +a
+fi
+
+ENGINE="${LOOP_ENGINNER_ENGINE:-codex}"
 FALLBACK_CHAIN_SPEC="${LOOP_ENGINNER_FALLBACK_CHAIN:-}"
 ACTIVE_PROVIDER=""
 FALLBACK_PROVIDERS=()
@@ -174,7 +184,7 @@ FALLBACK_INDEX=0
 INPUT_FILE=""
 FROM_PHASE=0
 KEEP_GOING=false
-TEST_CMD_FLAG=""
+TEST_CMD_FLAG="${LOOP_ENGINNER_TEST_CMD:-}"
 MAX_CYCLES="${LOOP_ENGINNER_MAX_CYCLES:-3}"
 VERIFY_MODE="${LOOP_ENGINNER_VERIFY:-always}"
 VERIFY_MODEL=""
@@ -186,28 +196,47 @@ CLI_SET_INPUT=0
 CLI_SET_TEST_CMD=0
 CLI_SET_VERIFY=0
 CLI_SET_MAX_CYCLES=0
+CLI_MODEL=""
+CLI_EFFORT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --engine)         ENGINE="$2"; CLI_SET_ENGINE=1; shift 2 ;;
-    --engine=*)       ENGINE="${1#*=}"; CLI_SET_ENGINE=1; shift ;;
+    --engine)           ENGINE="$2"; CLI_SET_ENGINE=1; shift 2 ;;
+    --engine=*)         ENGINE="${1#*=}"; CLI_SET_ENGINE=1; shift ;;
     --fallback-chain)   FALLBACK_CHAIN_SPEC="$2"; CLI_SET_FALLBACK=1; shift 2 ;;
     --fallback-chain=*) FALLBACK_CHAIN_SPEC="${1#*=}"; CLI_SET_FALLBACK=1; shift ;;
-    --from)           FROM_PHASE="$2"; shift 2 ;;
-    --from=*)         FROM_PHASE="${1#*=}"; shift ;;
-    --max-cycles)     MAX_CYCLES="$2"; CLI_SET_MAX_CYCLES=1; shift 2 ;;
-    --max-cycles=*)   MAX_CYCLES="${1#*=}"; CLI_SET_MAX_CYCLES=1; shift ;;
-    --test-cmd)       TEST_CMD_FLAG="$2"; CLI_SET_TEST_CMD=1; shift 2 ;;
-    --test-cmd=*)     TEST_CMD_FLAG="${1#*=}"; CLI_SET_TEST_CMD=1; shift ;;
-    --keep-going)     KEEP_GOING=true; shift ;;
-    --no-verify)      VERIFY_MODE="off"; CLI_SET_VERIFY=1; shift ;;
-    --resume)         RESUME=true; shift ;;
-    --no-supervise)   shift ;;
-    --dashboard)      DASHBOARD=true; shift ;;
-    -h|--help)        sed -n '2,89p' "$0"; exit 0 ;;
-    *)                INPUT_FILE="$1"; CLI_SET_INPUT=1; shift ;;
+    --model)            CLI_MODEL="$2"; shift 2 ;;
+    --model=*)          CLI_MODEL="${1#*=}"; shift ;;
+    --effort)           CLI_EFFORT="$2"; shift 2 ;;
+    --effort=*)         CLI_EFFORT="${1#*=}"; shift ;;
+    --from)             FROM_PHASE="$2"; shift 2 ;;
+    --from=*)           FROM_PHASE="${1#*=}"; shift ;;
+    --max-cycles)       MAX_CYCLES="$2"; CLI_SET_MAX_CYCLES=1; shift 2 ;;
+    --max-cycles=*)     MAX_CYCLES="${1#*=}"; CLI_SET_MAX_CYCLES=1; shift ;;
+    --test-cmd)         TEST_CMD_FLAG="$2"; CLI_SET_TEST_CMD=1; shift 2 ;;
+    --test-cmd=*)       TEST_CMD_FLAG="${1#*=}"; CLI_SET_TEST_CMD=1; shift ;;
+    --keep-going)       KEEP_GOING=true; shift ;;
+    --no-verify)        VERIFY_MODE="off"; CLI_SET_VERIFY=1; shift ;;
+    --resume)           RESUME=true; shift ;;
+    --no-supervise)     shift ;;
+    --dashboard)        DASHBOARD=true; shift ;;
+    -h|--help)          sed -n '2,89p' "$0"; exit 0 ;;
+    *)                  INPUT_FILE="$1"; CLI_SET_INPUT=1; shift ;;
   esac
 done
+
+if [ -n "$CLI_MODEL" ]; then
+  LOOP_ENGINNER_AGY_MODEL="$CLI_MODEL"
+  LOOP_ENGINNER_OPENCODE_MODEL="$CLI_MODEL"
+  LOOP_ENGINNER_CODEX_MODEL="$CLI_MODEL"
+  export LOOP_ENGINNER_AGY_MODEL LOOP_ENGINNER_OPENCODE_MODEL LOOP_ENGINNER_CODEX_MODEL
+fi
+
+if [ -n "$CLI_EFFORT" ]; then
+  LOOP_ENGINNER_AGY_EFFORT="$CLI_EFFORT"
+  LOOP_ENGINNER_CODEX_REASONING_EFFORT="$CLI_EFFORT"
+  export LOOP_ENGINNER_AGY_EFFORT LOOP_ENGINNER_CODEX_REASONING_EFFORT
+fi
 
 PHASES_DIR=".loop-enginner/run"
 LOG_DIR=".loop-enginner/logs"

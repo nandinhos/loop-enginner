@@ -18,6 +18,24 @@ adapter_opencode_bin() {
   printf '%s' "${LOOP_ENGINNER_OPENCODE_BIN:-opencode}"
 }
 
+adapter_opencode_models() {
+  local bin models=() line
+  bin="$(adapter_opencode_bin)"
+  if command -v "$bin" >/dev/null 2>&1; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && models+=("$line")
+    done < <("$bin" models 2>/dev/null | tr -d '\r' | head -n 30)
+  fi
+  if [ "${#models[@]}" -eq 0 ]; then
+    models=(
+      "opencode/claude-sonnet-4-6"
+      "opencode/claude-opus-4-6"
+      "opencode/gemini-3-flash"
+    )
+  fi
+  printf '%s\n' "${models[@]}"
+}
+
 adapter_opencode_check() {
   local bin inactivity
   bin="$(adapter_opencode_bin)"
