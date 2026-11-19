@@ -43,14 +43,38 @@ Antigravity (`agy`) ou OpenCode (`opencode`) — já logada.
 cd meu-projeto
 loop-enginner install   # escreve so .loop-enginner/ + .git/info/exclude
 loop-enginner new       # cria .loop-enginner/PHASES.md do template; edite-o
-loop-enginner run       # arvore limpa, branch descartavel
+loop-enginner run       # arvore limpa, branch descartavel (supervisor ativo por padrao)
+loop-enginner pause     # pausa graciosamente ao fim da fase/ciclo atual
+loop-enginner resume    # retoma run pausado/falho limpando so a fase incompleta
+loop-enginner report    # exibe e salva relatorio detalhado pos-execucao
 loop-enginner watch     # (outro terminal) painel ao vivo
 ```
 
 Opções úteis do `run`: `--engine claude`, `--engine agy` ou `--engine opencode`,
 `--fallback-chain auto` (ou `"codex agy opencode"`), `--from 3`, `--max-cycles 5`,
-`--test-cmd "npm test"`, `--dashboard` (painel embutido),
-`--no-verify`. A lista completa: `loop-enginner run --help`.
+`--test-cmd "npm test"`, `--dashboard` (painel embutido), `--resume`,
+`--no-supervise` (desliga retomada automática pós-falha), `--no-verify`.
+A lista completa: `loop-enginner run --help`.
+
+### Continuidade, Debug Sistemático, Retomada Segura e Pausa Graciosa
+
+- **Supervisor padrão ativo (`lib/supervisor.sh`):** o `loop-enginner run`
+  monitora o loop contra falhas e travas silenciosas (`LOOP_ENGINNER_SUPERVISOR_STALL_TIMEOUT`,
+  default `1800s`), acionando retomada automática segura em até **3 tentativas**
+  (`LOOP_ENGINNER_MAX_RECOVERIES=3`). Desligue pontualmente com `--no-supervise`
+  ou `LOOP_ENGINNER_SUPERVISE=off`.
+- **Debug Sistemático e retomada segura (`lib/recovery.sh`):** em ciclos de
+  correção e retomadas pós-falha, o prompt injeta protocolo de Debug Sistemático
+  com consulta oficial via Context7 (quando disponível) e memória opcional não
+  bloqueante. Com `loop-enginner resume` (ou `run --resume`), se uma fase
+  incompleta deixou a árvore suja sobre o mesmo `base_head`, o diff parcial é
+  arquivado em `.loop-enginner/state/recovery/` e apenas essa fase é reiniciada
+  do zero — preservando fases já commitadas e abortando em modo fail-closed diante
+  de alterações externas.
+- **Pausa graciosa:** `loop-enginner pause` (ou tecla `p` no painel `--dashboard`
+  / `watch`) encerra ao fim da fase concluída ou do ciclo vermelho corrente,
+  salvando o estado em `.loop-enginner/state/session.tsv` (`status=paused`) sem
+  despertar reinício automático do supervisor.
 
 ### Cadeia de fallback configurável
 
@@ -141,20 +165,28 @@ escuro (exceto com `--purge` explícito), e só remove a linha do
 
 `loop-enginner watch` desenha o painel “Loop Engineer” a partir de
 `.loop-enginner/state/` (leitor puro — pode rodar em outro terminal ou
-embutido via `run --dashboard`). O estado é publicado em todo run, com ou
-sem painel.
+embutido via `run --dashboard`), com rodapé dividido entre **LOGS RECENTES** e
+visor detalhado dos **GATES (G0..G3)** e atalho **`p`** para pausa graciosa. O
+estado é publicado em todo run, com ou sem painel.
 
-Eventos do run (`run_start`, `phase_done`, `gate_fail`, `limit_wait`, …)
+Ao concluir, pausar ou esgotar retomadas, `lib/report.sh` salva
+`.loop-enginner/state/report.md` e apresenta relatório estilizado no terminal
+com duração, commits, diffstat por fase, provider/modelo efetivo e tokens
+observados (`n/d (modo text)` quando o provider em modo texto não informa).
+
+Eventos do run (`run_start`, `phase_done`, `gate_fail`, `limit_wait`,
+`provider_fallback`, `supervisor_retry`, `run_paused`, …)
 podem chamar `.loop-enginner/hook.sh` — modelo em
 [templates/hook.example.sh](templates/hook.example.sh).
 
 ## Desenvolvimento
 
 ```bash
-bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, run com mock
+bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, watch, recovery, supervisor/report
 ```
 
-- `lib/loop.sh`, `lib/fallback.sh` e `lib/loop-watch.sh` são a fonte canônica;
+- `lib/loop.sh`, `lib/fallback.sh`, `lib/recovery.sh`, `lib/supervisor.sh`,
+  `lib/report.sh` e `lib/loop-watch.sh` são a fonte canônica;
   `tools/fork-from-upstream.py` reproduz o fork a partir dos scripts
   originais quando eles evoluírem (falha alto se um padrão sumir).
 - `adapters/` concentra os adapters de provider por contrato de sessão

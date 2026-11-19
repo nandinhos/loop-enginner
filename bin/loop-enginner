@@ -7,9 +7,11 @@
 #   install    instala no projeto atual (so .loop-enginner/ + .git/info/exclude)
 #   uninstall  remove exatamente o que o install criou (fail-closed)
 #   new        cria .loop-enginner/PHASES.md a partir do template
-#   run        roda o loop (lib/loop.sh) no projeto atual
+#   run        roda o loop com monitor/supervisor ativo (padrao) no projeto atual
 #   resume     retoma run pausado ou falho com limpeza segura da fase incompleta
 #   pause      solicita pausa graciosa ao fim da fase/ciclo atual
+#   supervise  executa explicitamente via monitor de continuidade (lib/supervisor.sh)
+#   report     gera e exibe o relatorio pos-execucao (lib/report.sh)
 #   watch      abre o painel (lib/loop-watch.sh)
 #   status     mostra instalacao, engines e estado do ultimo run
 #   doctor     checa pre-requisitos da maquina
@@ -62,6 +64,8 @@ Uso:
   loop-enginner run [opcoes do loop] [PHASES.md]
   loop-enginner resume [--target DIR] [opcoes do loop] [PHASES.md]
   loop-enginner pause [--target DIR] [--cancel]
+  loop-enginner supervise [opcoes do loop] [PHASES.md]
+  loop-enginner report [--target DIR] [--md] [--no-color]
   loop-enginner watch [opcoes do painel]
   loop-enginner status [--target DIR]
   loop-enginner doctor
@@ -292,9 +296,39 @@ cmd_new() {
 
 cmd_run() {
   [ -x "$LIB_DIR/loop.sh" ] || die "lib/loop.sh nao encontrado em $HOME_DIR (clone incompleto?)"
+  local supervise=1 want_help=0 arg
+  local -a filtered=()
+  case "${LOOP_ENGINNER_SUPERVISE:-on}" in
+    off|0|false|no) supervise=0 ;;
+  esac
+  for arg in "$@"; do
+    case "$arg" in
+      --no-supervise) supervise=0 ;;
+      -h|--help)      want_help=1; filtered+=("$arg") ;;
+      *)              filtered+=("$arg") ;;
+    esac
+  done
+  if [ "$want_help" -eq 1 ]; then
+    exec bash "$LIB_DIR/loop.sh" ${filtered[@]+"${filtered[@]}"}
+  fi
   ROOT="$(target_root ".")"
   cd "$ROOT"
-  exec bash "$LIB_DIR/loop.sh" "$@"
+  if [ "$supervise" -eq 1 ] && [ -x "$LIB_DIR/supervisor.sh" ]; then
+    exec bash "$LIB_DIR/supervisor.sh" ${filtered[@]+"${filtered[@]}"}
+  fi
+  exec bash "$LIB_DIR/loop.sh" ${filtered[@]+"${filtered[@]}"}
+}
+
+cmd_supervise() {
+  [ -x "$LIB_DIR/supervisor.sh" ] || die "lib/supervisor.sh nao encontrado em $HOME_DIR (clone incompleto?)"
+  ROOT="$(target_root ".")"
+  cd "$ROOT"
+  exec bash "$LIB_DIR/supervisor.sh" "$@"
+}
+
+cmd_report() {
+  [ -x "$LIB_DIR/report.sh" ] || die "lib/report.sh nao encontrado em $HOME_DIR (clone incompleto?)"
+  exec bash "$LIB_DIR/report.sh" "$@"
 }
 
 cmd_resume() {
@@ -418,6 +452,10 @@ cmd_doctor() {
     || { printf '  FALTA   lib/fallback.sh presente\n'; fails=$((fails + 1)); }
   [ -f "$LIB_DIR/recovery.sh" ] && printf '  ok      lib/recovery.sh presente\n' \
     || { printf '  FALTA   lib/recovery.sh presente\n'; fails=$((fails + 1)); }
+  [ -x "$LIB_DIR/supervisor.sh" ] && printf '  ok      lib/supervisor.sh executavel\n' \
+    || { printf '  FALTA   lib/supervisor.sh executavel\n'; fails=$((fails + 1)); }
+  [ -x "$LIB_DIR/report.sh" ] && printf '  ok      lib/report.sh executavel\n' \
+    || { printf '  FALTA   lib/report.sh executavel\n'; fails=$((fails + 1)); }
   [ -x "$LIB_DIR/loop-watch.sh" ] && printf '  ok      lib/loop-watch.sh executavel\n' \
     || { printf '  FALTA   lib/loop-watch.sh executavel\n'; fails=$((fails + 1)); }
   [ -f "$ADAPTERS_DIR/agy.sh" ] && printf '  ok      adapters/agy.sh presente\n' \
@@ -455,6 +493,8 @@ main() {
     run)       shift; cmd_run "$@" ;;
     resume)    shift; cmd_resume "$@" ;;
     pause)     shift; cmd_pause "$@" ;;
+    supervise) shift; cmd_supervise "$@" ;;
+    report)    shift; cmd_report "$@" ;;
     watch)     shift; cmd_watch "$@" ;;
     status)    shift; cmd_status "$@" ;;
     doctor)    shift; cmd_doctor "$@" ;;

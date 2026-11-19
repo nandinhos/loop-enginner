@@ -291,7 +291,7 @@ if (
   MOCK_AGY_MODE="service_fail" \
   LOOP_ENGINNER_FALLBACK_CHAIN="codex agy" \
   PATH="$BIN:/usr/bin:/bin" \
-    bash "$CLI" run --engine codex --max-cycles 1 --no-verify --test-cmd true PHASES.md \
+    bash "$CLI" run --no-supervise --engine codex --max-cycles 1 --no-verify --test-cmd true PHASES.md \
     > "$TMP/run-5a.log" 2>&1
 ); then
   fail "cenario 5a: cadeia esgotada deveria retornar != 0"
@@ -309,7 +309,7 @@ if (
   MOCK_AGY_CALLED_FILE="$AGY_CALLED_5B" \
   LOOP_ENGINNER_FALLBACK_CHAIN="codex agy" \
   PATH="$BIN:/usr/bin:/bin" \
-    bash "$CLI" run --engine codex --max-cycles 1 --no-verify --test-cmd true PHASES.md \
+    bash "$CLI" run --no-supervise --engine codex --max-cycles 1 --no-verify --test-cmd true PHASES.md \
     > "$TMP/run-5b.log" 2>&1
 ); then
   fail "cenario 5b: erro comum deveria retornar != 0"

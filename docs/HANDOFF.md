@@ -1,34 +1,39 @@
 # HANDOFF — continuação via Antigravity (agy)
 
-Gerado em 2026-11-18, atualizado na Fase A3 (v0.4.0).
+Gerado em 2026-11-18, atualizado na Fase B (`v0.5.0`, 2026-11-19).
 Destinatário: próximo agente e o humano que o conduz.
 
 ## Como retomar em 2 minutos
 
 ```bash
 cd loop-enginner
-bash tests/run-tests.sh        # baseline: 6 passaram, 0 falharam
+bash tests/run-tests.sh        # baseline: 9 passaram, 0 falharam
 ```
 
-Após revisar os commits em `dev`, promover para `main` e publicar quando
-aprovado (ou abrir nova fase a partir de `dev`).
+Após revisar os commits em `dev` (`origin/dev..dev`), promover para `main`,
+publicar (`git push`) e rodar `./install-global.sh` quando aprovado.
 
 ## Onde paramos
 
-O projeto nasceu como fork agnóstico e desacoplado do `ralph.sh` + `ralph-watch.sh`
-(detalhes em [STATUS.md](STATUS.md) e `NOTICE`). Toda a **Fase A** (A1 + A2 + A3)
-foi concluída localmente em `dev`, mantendo `main` intacta em `1844d63` até
-a revisão final:
+Toda a **Fase A** (`v0.2.0`–`v0.4.0`: adapters `agy`/`opencode` + cadeia de
+fallback configurável) e toda a **Fase B** (`v0.5.0`: visor de gates dividido,
+Debug Sistemático, retomada segura, pausa graciosa, monitor/supervisor de
+continuidade com até 3 retomadas e relatório estilizado pós-conclusão) estão
+implementadas e verdes em `dev`:
 
 - **Fase A1 (`v0.2.0`):** seam `adapters/` + adapter Antigravity (`adapters/agy.sh`).
 - **Fase A2 (`v0.3.0`):** adapter OpenCode (`adapters/opencode.sh`).
-- **Fase A3 (`v0.4.0`):** cadeia de fallback configurável + vigia de progresso
-  por provider (`lib/fallback.sh`, `--fallback-chain` / `LOOP_ENGINNER_FALLBACK_CHAIN`,
-  guarda absoluta de exit code), coberta por `tests/test-fallback.sh` (`6/6`).
+- **Fase A3 (`v0.4.0`):** cadeia de fallback configurável + vigia por provider (`lib/fallback.sh`).
+- **Fase B1 (`v0.5.0`):** rodapé dividido `LOGS RECENTES` \| `GATES (FASE N)` em `lib/loop-watch.sh` e `G0 run` em `lib/loop.sh`.
+- **Fase B2 (`v0.5.0`):** `lib/recovery.sh` com `run.lock`, `resume` seguro, Debug Sistemático (Context7 + memória opcional não bloqueante), pausa graciosa (`pause` e tecla `p`) e cleanup em `on_exit`.
+- **Fase B3 (`v0.5.0`):** `lib/supervisor.sh` (ativo por padrão no `run`, `--no-supervise` opcional, 3 retomadas, trava silenciosa) e `lib/report.sh` (relatório `.md` e terminal estilizado com parsing factual de tokens).
 
-Repositório remoto publicado em `https://github.com/nandinhos/loop-enginner.git`
-(público, topologia Clássico `dev -> main`); ainda sem install global nesta
-máquina e sem run com engine real neste fork.
+Validação ao vivo já realizada pelo dono com `agy` real em `/tmp/loop-enginner-demo`
+(branch `demo-agy-opencode`, 2 fases concluídas ponta a ponta em `v0.4.0`).
+
+Repositório remoto em `https://github.com/nandinhos/loop-enginner.git`
+(`origin/main` e `origin/dev` ainda na `v0.1.0` aguardando revisão e push manual
+do humano para promover A+B).
 
 ## Próxima tarefa — Fase A: adapters de provider no fallback
 
@@ -112,4 +117,4 @@ prática; leia antes de desenhar a A3, não copie código sem desacoplar:
 
 ## Perguntas abertas para o humano
 
-1. `./install-global.sh` nesta máquina agora, ou só após o primeiro run real?
+1. Após revisar `origin/dev..dev` (`v0.2.0`–`v0.5.0`), aprovar promoção para `main`, `git push` e execução de `./install-global.sh`?

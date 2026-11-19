@@ -226,7 +226,7 @@ fi
 if (
   cd "$REPO_FAIL"
   MOCK_AGY_MODE=fail PATH="$BIN:$PATH" \
-    bash "$CLI" run --engine agy --max-cycles 1 --no-verify --test-cmd true PHASES.md \
+    bash "$CLI" run --no-supervise --engine agy --max-cycles 1 --no-verify --test-cmd true PHASES.md \
     > "$TMP/fail.log" 2>&1
 ); then
   fail "run deveria falhar quando agy sai com exit 1"

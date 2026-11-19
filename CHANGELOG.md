@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.5.0 — 2026-11-19
+
+Fase B — Visibilidade de gates, debug sistemático, retomada segura, pausa graciosa, supervisor e relatório pós-conclusão:
+
+- `lib/loop-watch.sh` + `lib/loop.sh`: rodapé dividido em `LOGS RECENTES` e `GATES (FASE N)` exibindo símbolo, nome (`G0 Engine`, `G1 Escrita`, `G2 Testes`, `G3 Verificador`), descrição e estado em tempo real (`G0` marcado como `run`), além da tecla `p`/`P` para pausa graciosa.
+- `lib/recovery.sh`: lock de concorrência (`run.lock`), snapshot de arquivos não-rastreados, arquivamento seguro de diffs parciais em `.loop-enginner/state/recovery/`, limpeza restrita à fase incompleta (fail-closed diante de alterações externas/`HEAD` divergente), protocolo de Debug Sistemático (Context7 + memória opcional não bloqueante) e lições locais persistentes.
+- `lib/loop.sh`: suporte a `--resume`, restauração de defaults salvos em `session.tsv`, checkpoint gracioso de pausa pós-fase/pós-ciclo e correção de `on_exit` para encerrar subprocessos/watchdog e limpar `.pid` e `run.lock` em `SIGINT`/`SIGTERM`.
+- `lib/supervisor.sh`: monitor/supervisor ativo por padrão em `loop-enginner run` (desativável com `--no-supervise` / `LOOP_ENGINNER_SUPERVISE=off`), detectando falhas e travas silenciosas para retomar automaticamente até `LOOP_ENGINNER_MAX_RECOVERIES` (default `3`), respeitando pausas do operador e propagando falhas de preflight sem gastar tentativas.
+- `lib/report.sh` + `bin/loop-enginner`: novos subcomandos `resume`, `pause`, `supervise` e `report` (salva `.loop-enginner/state/report.md` e exibe resumo estilizado com métricas de tempo, commits, diffstat por fase, fallback e contagem factual de tokens ou `n/d (modo text)`).
+- `tests/test-watch-gates.sh`, `tests/test-recovery-pause.sh`, `tests/test-supervisor-report.sh` e `tests/test-syntax.sh`: suíte ampliada para `9/9` suítes com mocks e `shellcheck -S error`.
+
 ## v0.4.0 — 2026-11-18
 
 Fase A3 — Cadeia de fallback configurável e vigia de progresso por provider:

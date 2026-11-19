@@ -104,7 +104,7 @@ if (
   MOCK_P2_FAIL_ONCE_FLAG="$FAIL_ONCE_1" \
   MOCK_PROMPT_LOG_DIR="$PROMPTS1" \
   PATH="$BIN:$PATH" \
-    bash "$CLI" run --engine codex --max-cycles 1 --no-verify \
+    bash "$CLI" run --no-supervise --engine codex --max-cycles 1 --no-verify \
       --test-cmd 'bash -c "if [ -f partial-p2.txt ]; then echo teste falhou por parcial; exit 1; fi; test -f p1.txt"' \
       PHASES.md > "$TMP/run1-fail.log" 2>&1
 ); then
@@ -302,7 +302,7 @@ READY6="$TMP/ready6"
   LOOP_ENGINNER_WATCHDOG_POLL=1 \
   LOOP_ENGINNER_CODEX_INACTIVITY_TIMEOUT=20 \
   PATH="$BIN:$PATH" \
-    bash "$CLI" run --engine codex --no-verify --test-cmd true PHASES.md > "$TMP/r6.log" 2>&1
+    bash "$CLI" run --no-supervise --engine codex --no-verify --test-cmd true PHASES.md > "$TMP/r6.log" 2>&1
 ) &
 RUN6_PID=$!
 

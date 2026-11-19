@@ -1,29 +1,29 @@
 # STATUS — Loop Enginner
 
-Atualizado em 2026-11-18 · Versão: **0.4.0** (`VERSION`) · Branches: `main` / `dev`
+Atualizado em 2026-11-19 · Versão: **0.5.0** (`VERSION`) · Branches: `main` / `dev`
 
-## Feito e provado (evidência: `bash tests/run-tests.sh` → 6/6)
+## Feito e provado (evidência: `bash tests/run-tests.sh` → 9/9)
 
 | Área | Estado | Prova |
 |---|---|---|
 | Núcleo `lib/loop.sh` (fork agnóstico) | ✅ | `tests/test-loop-mock.sh`: run mock gera commit por fase |
-| Adapter Antigravity (`agy`) | ✅ | `tests/test-adapter-agy.sh` (impl + verify + batch + doctor/status) |
+| Adapter Antigravity (`agy`) | ✅ | `tests/test-adapter-agy.sh` + run real validado pelo usuário em `/tmp/loop-enginner-demo` (2 fases, commits `b21898d` e `fb48416`) |
 | Adapter OpenCode (`opencode`) | ✅ | `tests/test-adapter-opencode.sh` (impl + verify read-only + batch + doctor/status) |
 | Cadeia de fallback configurável (`lib/fallback.sh`) | ✅ | `tests/test-fallback.sh` (troca por quota, guarda `exit 0`, vigia por provider, `auto` e fail-closed) |
-| Painel `lib/loop-watch.sh` | ✅ | mesmo teste: frame `--once` com banner, caixas e `Provider:` |
+| Painel dividido `LOGS RECENTES` \| `GATES` | ✅ | `tests/test-watch-gates.sh`: W=120, W=100, W=96, W=80 e `--once` sem log |
+| Debug Sistemático, `resume`, lock e `pause` (`lib/recovery.sh`) | ✅ | `tests/test-recovery-pause.sh`: limpeza segura restrita à fase incompleta, fail-closed externo, `run.lock`, pausa graciosa e `SIGTERM` |
+| Supervisor ativo + Relatório pós-conclusão (`lib/supervisor.sh`, `lib/report.sh`) | ✅ | `tests/test-supervisor-report.sh`: até 3 retomadas, trava silenciosa, `recovery_required`, respeito a pausa e relatório `.md`/terminal com tokens factuais |
 | CLI install/uninstall reversível | ✅ | `tests/test-install.sh`: árvore limpa antes/depois |
-| CLI new/run/watch/status/doctor/version | ✅ | `doctor` executado; `run`/`watch`/`status` cobertos pelos mocks |
-| Sintaxe + shellcheck + desacoplamento | ✅ | `tests/test-syntax.sh` (grep anti-resíduo na lib e adapters) |
+| CLI complete (`run`/`resume`/`pause`/`supervise`/`report`/`watch`/`status`/`doctor`) | ✅ | `doctor`, `status`, `version` e `run --help` executados |
+| Sintaxe + shellcheck + desacoplamento | ✅ | `tests/test-syntax.sh` (grep anti-resíduo em `lib/` e `adapters/`) |
 | Fork reproduzível | ✅ | `tools/fork-from-upstream.py` regerou a lib com hashes idênticos |
 | Install global (symlink) | ✅ provado em prefixo descartável | `PREFIX=/tmp/le-prefix ./install-global.sh` + doctor + `--uninstall` |
 | Repositório remoto (GitHub) | ✅ | `https://github.com/nandinhos/loop-enginner` (público, `main` e `dev`) |
 
 ## Não provado / não feito
 
-- **Run com engine real** (`codex`/`claude`/`agy`/`opencode`): nunca executado neste fork.
-  Exige branch descartável, árvore limpa e quota — decisão manual do humano.
-- **Install global nesta máquina:** o symlink em `~/.local/bin` ainda não
-  foi criado (proposital; `./install-global.sh` quando o humano quiser).
+- **Run com engine real** em `codex`/`claude`/`opencode` e validação em vivo do novo painel/supervisor v0.5.0: não executados automaticamente (decisão manual do humano em branch descartável).
+- **Install global nesta máquina:** o symlink em `~/.local/bin` ainda não foi criado (`./install-global.sh` após revisão final).
 
 ## Decisões fechadas (não reabrir sem o humano)
 

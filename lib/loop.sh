@@ -31,6 +31,7 @@
 #   --test-cmd "<cmd>"       comando de teste do projeto (gate 2)
 #   --fallback-chain LIST    cadeia de fallback (ex: "auto" ou "codex agy")
 #   --resume                 retoma run pausado ou falho com limpeza segura
+#   --no-supervise           desativa o monitor automatico pos-falha (supervisor)
 #   --dashboard              painel ao vivo no terminal (requer loop-watch.sh;
 #                            logs em .loop-enginner/logs/loop.log)
 #
@@ -115,6 +116,10 @@
 #   LOOP_ENGINNER_PROVIDER_INACTIVITY_TIMEOUT limite de silencio default streaming (default: 300s)
 #   LOOP_ENGINNER_CODEX_INACTIVITY_TIMEOUT    limite de silencio do codex
 #   LOOP_ENGINNER_CLAUDE_INACTIVITY_TIMEOUT   limite de silencio do claude
+#   LOOP_ENGINNER_SUPERVISE          on (default) | off para monitor/retomada automatica
+#   LOOP_ENGINNER_MAX_RECOVERIES     maximo de retomadas do supervisor (default: 3)
+#   LOOP_ENGINNER_SUPERVISOR_INTERVAL intervalo em s entre checagens do supervisor (default: 15)
+#   LOOP_ENGINNER_SUPERVISOR_STALL_TIMEOUT limite de inatividade no supervisor (default: 1800)
 #
 # Exportadas para hooks (ex: hook de notificacao) durante cada sessao de engine:
 #   LOOP_ENGINNER_ENGINE             codex | claude | agy | opencode
@@ -197,8 +202,9 @@ while [[ $# -gt 0 ]]; do
     --keep-going)     KEEP_GOING=true; shift ;;
     --no-verify)      VERIFY_MODE="off"; CLI_SET_VERIFY=1; shift ;;
     --resume)         RESUME=true; shift ;;
+    --no-supervise)   shift ;;
     --dashboard)      DASHBOARD=true; shift ;;
-    -h|--help)        sed -n '2,88p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '2,89p' "$0"; exit 0 ;;
     *)                INPUT_FILE="$1"; CLI_SET_INPUT=1; shift ;;
   esac
 done
@@ -2346,6 +2352,9 @@ main() {
     stop_dashboard
     history_record run_paused "${META[phase_cur]:-0}" "pausa graciosa concluida"
     emit_hook run_paused "run pausado graciosamente; retome com: loop-enginner resume"
+    if [ "${LOOP_ENGINNER_REPORT_SKIP:-0}" != "1" ] && [ -x "$LOOP_HOME_DIR/lib/report.sh" ]; then
+      bash "$LOOP_HOME_DIR/lib/report.sh" --target "$(pwd)" || true
+    fi
     echo ""
     warn "Run pausado graciosamente. Progresso salvo em .loop-enginner/state/session.tsv."
     log "Para retomar do ponto de parada:"
@@ -2382,37 +2391,43 @@ main() {
   # no terminal de verdade, senao o run termina sem deixar rastro na rolagem.
   stop_dashboard
 
-  echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  log "RELATORIO FINAL (engine: $ENGINE)"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  if [ "${LOOP_ENGINNER_REPORT_SKIP:-0}" != "1" ]; then
+    if [ -x "$LOOP_HOME_DIR/lib/report.sh" ]; then
+      bash "$LOOP_HOME_DIR/lib/report.sh" --target "$(pwd)" || true
+    else
+      echo ""
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      log "RELATORIO FINAL (engine: $ENGINE)"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  local phase
-  if [ ${#completed_phases[@]} -gt 0 ]; then
-    echo ""
-    success "Completadas (${#completed_phases[@]}):"
-    for phase in "${completed_phases[@]}"; do printf '    %b%s%b\n' "$GREEN" "$phase" "$NC"; done
+      local phase
+      if [ ${#completed_phases[@]} -gt 0 ]; then
+        echo ""
+        success "Completadas (${#completed_phases[@]}):"
+        for phase in "${completed_phases[@]}"; do printf '    %b%s%b\n' "$GREEN" "$phase" "$NC"; done
+      fi
+
+      if [ ${#skipped_phases[@]} -gt 0 ]; then
+        echo ""
+        log "Puladas (${#skipped_phases[@]}):"
+        for phase in "${skipped_phases[@]}"; do printf '    %s\n' "$phase"; done
+      fi
+
+      if [ ${#failed_phases[@]} -gt 0 ]; then
+        echo ""
+        fail "Falharam (${#failed_phases[@]}):"
+        for phase in "${failed_phases[@]}"; do printf '    %b%s%b\n' "$RED" "$phase" "$NC"; done
+        echo ""
+        fail "Verifique os logs em $LOG_DIR/"
+      fi
+
+      echo ""
+      log "Inicio: $(date -d "@$start_time" '+%d/%m/%Y %H:%M:%S')"
+      log "Fim:    $(date -d "@$end_time" '+%d/%m/%Y %H:%M:%S')"
+      log "Duracao total: $(format_duration "$total_duration")"
+      echo ""
+    fi
   fi
-
-  if [ ${#skipped_phases[@]} -gt 0 ]; then
-    echo ""
-    log "Puladas (${#skipped_phases[@]}):"
-    for phase in "${skipped_phases[@]}"; do printf '    %s\n' "$phase"; done
-  fi
-
-  if [ ${#failed_phases[@]} -gt 0 ]; then
-    echo ""
-    fail "Falharam (${#failed_phases[@]}):"
-    for phase in "${failed_phases[@]}"; do printf '    %b%s%b\n' "$RED" "$phase" "$NC"; done
-    echo ""
-    fail "Verifique os logs em $LOG_DIR/"
-  fi
-
-  echo ""
-  log "Inicio: $(date -d "@$start_time" '+%d/%m/%Y %H:%M:%S')"
-  log "Fim:    $(date -d "@$end_time" '+%d/%m/%Y %H:%M:%S')"
-  log "Duracao total: $(format_duration "$total_duration")"
-  echo ""
 
   local veredito="tudo verde"
   [ ${#failed_phases[@]} -eq 0 ] || veredito="FALHOU"
