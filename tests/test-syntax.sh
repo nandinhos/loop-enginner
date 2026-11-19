@@ -12,7 +12,7 @@ for f in "$ROOT/bin/loop-enginner" "$ROOT/install-global.sh" \
   bash -n "$f" || fail "bash -n: $f"
   [ -x "$f" ] || fail "nao executavel: $f"
 done
-for f in "$ROOT"/adapters/*.sh; do
+for f in "$ROOT"/adapters/*.sh "$ROOT/lib/fallback.sh"; do
   bash -n "$f" || fail "bash -n: $f"
 done
 printf 'ok: bash -n e +x em todos os scripts\n'
@@ -24,7 +24,7 @@ printf 'ok: tools/fork-from-upstream.py compila\n'
 
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck -S error "$ROOT/bin/loop-enginner" "$ROOT/install-global.sh" \
-    "$ROOT/lib/loop.sh" "$ROOT/lib/loop-watch.sh" "$ROOT"/adapters/*.sh "$ROOT"/tests/*.sh \
+    "$ROOT/lib/loop.sh" "$ROOT/lib/fallback.sh" "$ROOT/lib/loop-watch.sh" "$ROOT"/adapters/*.sh "$ROOT"/tests/*.sh \
     || fail "shellcheck -S error"
   printf 'ok: shellcheck -S error\n'
 else
@@ -33,7 +33,7 @@ fi
 
 # A lib e os adapters nao podem voltar a acoplar nos nomes/projetos de origem.
 if grep -nE 'RALPH_|RALPH-TASK|ralph\.sh|ralph-watch|\.phases/|bc-harness|claude-profiles|ralph-provider-bin|ralph-events|watcher-features|ralph-dispatch|ralph-watcher|ralph-codex-dispatch' \
-     "$ROOT/lib/loop.sh" "$ROOT/lib/loop-watch.sh" "$ROOT"/adapters/*.sh; then
+     "$ROOT/lib/loop.sh" "$ROOT/lib/fallback.sh" "$ROOT/lib/loop-watch.sh" "$ROOT"/adapters/*.sh; then
   fail "residuo de acoplamento na lib/adapters (ver acima)"
 fi
 printf 'ok: lib e adapters sem residuos de acoplamento\n'

@@ -1,14 +1,15 @@
 # STATUS — Loop Enginner
 
-Atualizado em 2026-11-18 · Versão: **0.3.0** (`VERSION`) · Branches: `main` / `dev`
+Atualizado em 2026-11-18 · Versão: **0.4.0** (`VERSION`) · Branches: `main` / `dev`
 
-## Feito e provado (evidência: `bash tests/run-tests.sh` → 5/5)
+## Feito e provado (evidência: `bash tests/run-tests.sh` → 6/6)
 
 | Área | Estado | Prova |
 |---|---|---|
 | Núcleo `lib/loop.sh` (fork agnóstico) | ✅ | `tests/test-loop-mock.sh`: run mock gera commit por fase |
 | Adapter Antigravity (`agy`) | ✅ | `tests/test-adapter-agy.sh` (impl + verify + batch + doctor/status) |
 | Adapter OpenCode (`opencode`) | ✅ | `tests/test-adapter-opencode.sh` (impl + verify read-only + batch + doctor/status) |
+| Cadeia de fallback configurável (`lib/fallback.sh`) | ✅ | `tests/test-fallback.sh` (troca por quota, guarda `exit 0`, vigia por provider, `auto` e fail-closed) |
 | Painel `lib/loop-watch.sh` | ✅ | mesmo teste: frame `--once` com banner, caixas e `Provider:` |
 | CLI install/uninstall reversível | ✅ | `tests/test-install.sh`: árvore limpa antes/depois |
 | CLI new/run/watch/status/doctor/version | ✅ | `doctor` executado; `run`/`watch`/`status` cobertos pelos mocks |
@@ -23,8 +24,6 @@ Atualizado em 2026-11-18 · Versão: **0.3.0** (`VERSION`) · Branches: `main` /
   Exige branch descartável, árvore limpa e quota — decisão manual do humano.
 - **Install global nesta máquina:** o symlink em `~/.local/bin` ainda não
   foi criado (proposital; `./install-global.sh` quando o humano quiser).
-- **Cadeia de fallback configurável (Fase A3):** planejada, não implementada —
-  ver [ROADMAP.md](ROADMAP.md) e a tarefa detalhada em [HANDOFF.md](HANDOFF.md).
 
 ## Decisões fechadas (não reabrir sem o humano)
 

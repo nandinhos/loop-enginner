@@ -47,9 +47,26 @@ loop-enginner run       # arvore limpa, branch descartavel
 loop-enginner watch     # (outro terminal) painel ao vivo
 ```
 
-Opções úteis do `run`: `--engine claude`, `--engine agy` ou `--engine opencode`, `--from 3`, `--max-cycles 5`,
+Opções úteis do `run`: `--engine claude`, `--engine agy` ou `--engine opencode`,
+`--fallback-chain auto` (ou `"codex agy opencode"`), `--from 3`, `--max-cycles 5`,
 `--test-cmd "npm test"`, `--dashboard` (painel embutido),
 `--no-verify`. A lista completa: `loop-enginner run --help`.
+
+### Cadeia de fallback configurável
+
+Sem `LOOP_ENGINNER_FALLBACK_CHAIN` (ou `--fallback-chain`), o loop executa apenas
+a engine pedida em `--engine`. Para habilitar fallback:
+
+- `--fallback-chain auto` / `LOOP_ENGINNER_FALLBACK_CHAIN=auto`: começa em
+  `--engine` e encadeia automaticamente as demais engines disponíveis no `PATH`.
+- `--fallback-chain "codex agy opencode"`: cadeia explícita (fail-closed no
+  preflight se qualquer degrau estiver ausente ou inválido).
+
+A troca de provider só acontece **após falha real** (`rc != 0`, limite/quota,
+autenticação, indisponibilidade ou travamento sem progresso), nunca por texto
+que apenas ecoe no log de uma sessão bem-sucedida. O vigia de inatividade usa
+timeout **por provider** (`streaming` vs `batch`, configurável em
+[templates/config.env.example](templates/config.env.example)).
 
 Sem argumento de entrada, o loop resolve nesta ordem:
 `.loop-enginner/PHASES.md` → `PHASES.md` na raiz → layouts legados
@@ -137,7 +154,7 @@ podem chamar `.loop-enginner/hook.sh` — modelo em
 bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, run com mock
 ```
 
-- `lib/loop.sh` e `lib/loop-watch.sh` são a fonte canônica;
+- `lib/loop.sh`, `lib/fallback.sh` e `lib/loop-watch.sh` são a fonte canônica;
   `tools/fork-from-upstream.py` reproduz o fork a partir dos scripts
   originais quando eles evoluírem (falha alto se um padrão sumir).
 - `adapters/` concentra os adapters de provider por contrato de sessão
@@ -146,9 +163,7 @@ bash tests/run-tests.sh   # sintaxe+shellcheck, install/uninstall, run com mock
 - Agentes (Antigravity e outros): comecem por [AGENTS.md](AGENTS.md) e
   [docs/HANDOFF.md](docs/HANDOFF.md); estado atual em
   [docs/STATUS.md](docs/STATUS.md), histórico em
-  [CHANGELOG.md](CHANGELOG.md).
-- Direção futura (cadeia de fallback configurável):
-  [docs/ROADMAP.md](docs/ROADMAP.md).
+  [CHANGELOG.md](CHANGELOG.md) e [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Licença
 

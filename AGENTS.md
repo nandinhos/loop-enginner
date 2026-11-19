@@ -60,6 +60,7 @@ Runner de loops estruturados e autônomos sobre qualquer repo Git:
 | `bin/loop-enginner` | CLI (install/uninstall/new/run/watch/status/doctor) |
 | `adapters/` | Adapters de provider por contrato de sessão (`agy.sh`, `opencode.sh`, …) |
 | `lib/loop.sh` | Núcleo do loop (preflight, gates 0–3, sessões, commits) |
+| `lib/fallback.sh` | Cadeia de fallback configurável, gatilhos pós-falha e vigia por provider |
 | `lib/loop-watch.sh` | Painel de terminal (leitor puro do estado TSV) |
 | `install-global.sh` | Symlink em `~/.local/bin` (máquina), com `--uninstall` |
 | `templates/` | `PHASES`, `config.env` e `hook` de exemplo copiados no install |

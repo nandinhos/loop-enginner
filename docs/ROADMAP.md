@@ -11,19 +11,15 @@
   4 gates mecânicos e 1 commit por fase, como no loop original.
 - Hook de eventos, estado observável em TSV e dashboard ao vivo.
 
-## Proxima fase (planejado, NAO implementado)
+## Concluído após a v0.1.0 (v0.2.0 – v0.4.0)
 
-Pacote de adapters de provider para o processo de fallback, trazendo
-modelos distintos para a mesma cadeia do loop:
+Pacote de adapters de provider e cadeia de fallback configurável:
 
-- **Antigravity (`agy`)** como adapter de provider;
-- **OpenCode (`opencode`)** como adapter de provider;
-- cadeia de fallback configurável (ex.: `codex -> agy -> opencode`),
-  com gatilhos provados (quota, limite, indisponibilidade, travamento
-  sem progresso) — cada gatilho novo exige reprodução + teste, para não
-  disparar fallback por texto que apenas aparece no log.
-
-Desenho esperado (a detalhar quando a fase abrir): adapters moram em
-`adapters/`, um por provider, atrás do mesmo contrato de sessão das
-engines atuais; o núcleo do loop não muda. Nada disso existe ainda —
-este arquivo registra a intenção, não uma promessa de interface.
+- **v0.2.0 — Antigravity (`agy`)** em `adapters/agy.sh`: adapter em modo batch
+  (`--output-format text`, `--print-timeout`) atrás da seam `adapters/`.
+- **v0.3.0 — OpenCode (`opencode`)** em `adapters/opencode.sh`: adapter em modo
+  batch (`opencode run --auto` no `impl` e `--agent plan` no `verify`).
+- **v0.4.0 — Cadeia de fallback configurável** em `lib/fallback.sh`:
+  `--fallback-chain` / `LOOP_ENGINNER_FALLBACK_CHAIN` (vazio, `auto` ou lista
+  explícita fail-closed), gatilhos pós-falha com guarda absoluta de exit code e
+  vigia de inatividade por provider (`streaming` vs `batch`).

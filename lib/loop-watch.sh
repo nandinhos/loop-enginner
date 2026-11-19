@@ -611,9 +611,11 @@ draw_header() {
   L+=("$tmp"); printf -v tmp 'Status: %s' "$(run_status_plain)"; LP+=("$tmp")
 
   local effective_provider="${META[provider]:-${META[engine]:-—}}"
+  local prov_color="$C_TEXT_PRIMARY"
+  [ "$effective_provider" != "${META[engine]:-—}" ] && prov_color="$C_WARNING"
   printf -v tmp '%sEngine:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "${META[engine]:-—}" "$C_RESET"
   R+=("$tmp"); printf -v tmp 'Engine: %s' "${META[engine]:-—}"; RP+=("$tmp")
-  printf -v tmp '%sProvider:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "$effective_provider" "$C_RESET"
+  printf -v tmp '%sProvider:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$prov_color" "$effective_provider" "$C_RESET"
   R+=("$tmp"); printf -v tmp 'Provider: %s' "$effective_provider"; RP+=("$tmp")
   printf -v tmp '%sModelo:%s %s%s%s' "$C_PRIMARY" "$C_RESET" "$C_TEXT_PRIMARY" "${META[model]:-—}" "$C_RESET"
   R+=("$tmp"); printf -v tmp 'Modelo: %s' "${META[model]:-—}"; RP+=("$tmp")

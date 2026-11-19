@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.4.0 — 2026-11-18
+
+Fase A3 — Cadeia de fallback configurável e vigia de progresso por provider:
+
+- `lib/fallback.sh`: resolução de cadeia via `--fallback-chain` /
+  `LOOP_ENGINNER_FALLBACK_CHAIN` (vazio = só `--engine`, `auto` = engines
+  detectadas no `PATH`, lista explícita = fail-closed no preflight), decisão
+  pós-falha com guarda absoluta de exit code e vigia de inatividade por
+  provider (`streaming` vs `batch`).
+- `lib/loop.sh`: suporte a `--fallback-chain`, `ACTIVE_PROVIDER` sticky no run,
+  evento `provider_fallback` em hooks/histórico e Gate 0/`detect_usage_limit`
+  orientados ao provider efetivo.
+- `lib/loop-watch.sh`: destaque visual em `Provider:` quando há fallback ativo.
+- `bin/loop-enginner`: `doctor` valida `lib/fallback.sh`; `status` exibe
+  `engine=` e `provider=` do último run.
+- `tests/test-fallback.sh` e `tests/test-syntax.sh`: cobertura com mocks de
+  troca por quota + sticky, teste negativo (`exit 0` com texto de gatilho),
+  vigia por provider (`codex` travado vs `agy` batch), `auto` vs fail-closed,
+  cadeia esgotada e erro comum sem fallback.
+- `templates/config.env.example`: variáveis `LOOP_ENGINNER_FALLBACK_*` e timeouts
+  por provider documentados.
+
 ## v0.3.0 — 2026-11-18
 
 Fase A2 — Adapter OpenCode (`opencode`) atrás da seam `adapters/`:

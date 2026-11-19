@@ -29,9 +29,9 @@
 #   --max-cycles N           ciclos de correcao por fase (default: 3)
 #   --no-verify              desliga o gate 3 (equivale a LOOP_ENGINNER_VERIFY=off)
 #   --test-cmd "<cmd>"       comando de teste do projeto (gate 2)
-#   --dashboard              painel ao vivo no terminal (requer loop-watch.sh
-#                            ao lado deste script); os logs vao para
-#                            .loop-enginner/logs/loop.log
+#   --fallback-chain LIST    cadeia de fallback (ex: "auto" ou "codex agy")
+#   --dashboard              painel ao vivo no terminal (requer loop-watch.sh;
+#                            logs em .loop-enginner/logs/loop.log)
 #
 # Observabilidade:
 #   O estado do run e SEMPRE publicado em .loop-enginner/state/ (run.tsv + live.tsv),
@@ -109,6 +109,11 @@
 #   LOOP_ENGINNER_OPENCODE_AGENT     agente opcional para o modo impl no opencode
 #   LOOP_ENGINNER_OPENCODE_VERIFY_AGENT agente read-only no verify (default: plan)
 #   LOOP_ENGINNER_OPENCODE_INACTIVITY_TIMEOUT limite de silencio do opencode (default: 900s)
+#   LOOP_ENGINNER_FALLBACK_CHAIN     cadeia de fallback ("", "auto" ou lista ex: "codex agy opencode")
+#   LOOP_ENGINNER_FALLBACK_PATTERN   regex ERE para gatilhos pos-falha (override opcional)
+#   LOOP_ENGINNER_PROVIDER_INACTIVITY_TIMEOUT limite de silencio default streaming (default: 300s)
+#   LOOP_ENGINNER_CODEX_INACTIVITY_TIMEOUT    limite de silencio do codex
+#   LOOP_ENGINNER_CLAUDE_INACTIVITY_TIMEOUT   limite de silencio do claude
 #
 # Exportadas para hooks (ex: hook de notificacao) durante cada sessao de engine:
 #   LOOP_ENGINNER_ENGINE             codex | claude | agy | opencode
@@ -123,7 +128,7 @@
 #   LOOP_ENGINNER_HOOK               executavel chamado a cada evento; se nao definido,
 #                            usa ./.loop-enginner/hook.sh do repo-alvo se existir
 #   Chamada: HOOK <evento> <detalhe>; eventos: run_start phase_start cycle_start
-#   gate_fail phase_done phase_already_done phase_failed limit_wait run_end
+#   gate_fail phase_done phase_already_done phase_failed limit_wait provider_fallback run_end
 #   Best-effort: hook ausente, lento (timeout 10s) ou com erro nunca derruba o run
 #
 # Exit code: 0 = todas as fases verdes; 1 = alguma falhou ou abortou.
@@ -152,7 +157,14 @@ load_adapter() {
   source "$f"
 }
 
+# shellcheck source=/dev/null
+source "$LOOP_HOME_DIR/lib/fallback.sh"
+
 ENGINE="codex"
+FALLBACK_CHAIN_SPEC="${LOOP_ENGINNER_FALLBACK_CHAIN:-}"
+ACTIVE_PROVIDER=""
+FALLBACK_PROVIDERS=()
+FALLBACK_INDEX=0
 INPUT_FILE=""
 FROM_PHASE=0
 KEEP_GOING=false
@@ -164,19 +176,21 @@ DASHBOARD=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --engine)      ENGINE="$2"; shift 2 ;;
-    --engine=*)    ENGINE="${1#*=}"; shift ;;
-    --from)        FROM_PHASE="$2"; shift 2 ;;
-    --from=*)      FROM_PHASE="${1#*=}"; shift ;;
-    --max-cycles)  MAX_CYCLES="$2"; shift 2 ;;
-    --max-cycles=*) MAX_CYCLES="${1#*=}"; shift ;;
-    --test-cmd)    TEST_CMD_FLAG="$2"; shift 2 ;;
-    --test-cmd=*)  TEST_CMD_FLAG="${1#*=}"; shift ;;
-    --keep-going)  KEEP_GOING=true; shift ;;
-    --no-verify)   VERIFY_MODE="off"; shift ;;
-    --dashboard)   DASHBOARD=true; shift ;;
-    -h|--help)     sed -n '2,83p' "$0"; exit 0 ;;
-    *)             INPUT_FILE="$1"; shift ;;
+    --engine)         ENGINE="$2"; shift 2 ;;
+    --engine=*)       ENGINE="${1#*=}"; shift ;;
+    --fallback-chain)   FALLBACK_CHAIN_SPEC="$2"; shift 2 ;;
+    --fallback-chain=*) FALLBACK_CHAIN_SPEC="${1#*=}"; shift ;;
+    --from)           FROM_PHASE="$2"; shift 2 ;;
+    --from=*)         FROM_PHASE="${1#*=}"; shift ;;
+    --max-cycles)     MAX_CYCLES="$2"; shift 2 ;;
+    --max-cycles=*)   MAX_CYCLES="${1#*=}"; shift ;;
+    --test-cmd)       TEST_CMD_FLAG="$2"; shift 2 ;;
+    --test-cmd=*)     TEST_CMD_FLAG="${1#*=}"; shift ;;
+    --keep-going)     KEEP_GOING=true; shift ;;
+    --no-verify)      VERIFY_MODE="off"; shift ;;
+    --dashboard)      DASHBOARD=true; shift ;;
+    -h|--help)        sed -n '2,83p' "$0"; exit 0 ;;
+    *)                INPUT_FILE="$1"; shift ;;
   esac
 done
 
@@ -516,19 +530,15 @@ preflight_checks() {
     VERIFY_MODEL="sonnet"
   fi
 
-  if is_adapter_engine "$ENGINE"; then
-    load_adapter "$ENGINE" || { fail "Falha ao carregar adapter: $ENGINE"; exit 1; }
-    local check_err
-    if ! check_err=$("adapter_${ENGINE}_check" 2>&1); then
-      fail "$check_err"
-      exit 1
-    fi
-  elif ! command -v "$ENGINE" &> /dev/null; then
-    if [[ "$ENGINE" == "codex" ]]; then
-      fail "codex CLI nao encontrado. Instale com: npm install -g @openai/codex"
-    else
-      fail "Claude Code CLI nao encontrado. Instale com: npm install -g @anthropic-ai/claude-code"
-    fi
+  if ! fallback_validate_timeouts; then
+    exit 1
+  fi
+
+  if ! fallback_provider_check "$ENGINE"; then
+    exit 1
+  fi
+
+  if ! fallback_resolve_chain "$ENGINE" "$FALLBACK_CHAIN_SPEC"; then
     exit 1
   fi
 
@@ -558,7 +568,11 @@ preflight_checks() {
   resolve_test_cmd
 
   resolve_hook
-  success "Pre-checks OK (engine: $ENGINE, input: $INPUT_FILE)"
+  if [ "${#FALLBACK_PROVIDERS[@]}" -gt 1 ]; then
+    success "Pre-checks OK (engine: $ENGINE, fallback: ${FALLBACK_PROVIDERS[*]}, input: $INPUT_FILE)"
+  else
+    success "Pre-checks OK (engine: $ENGINE, input: $INPUT_FILE)"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -764,28 +778,30 @@ state_flush() {
 
 state_meta() { META[$1]="$2"; state_flush; }
 
+state_sync_provider() {
+  local cur="${ACTIVE_PROVIDER:-$ENGINE}"
+  META[provider]="$cur"
+  META[model]="$(fallback_provider_meta "$cur" model)"
+  META[profile]="$(fallback_provider_meta "$cur" profile)"
+  META[reasoning_effort]="$(fallback_provider_meta "$cur" reasoning_effort)"
+}
+
 state_init() {
   mkdir -p "$STATE_DIR"
   : > "$LIVE_STATE"
 
-  local meta_model meta_profile meta_effort
-  if is_adapter_engine "$ENGINE" && declare -F "adapter_${ENGINE}_meta" >/dev/null 2>&1; then
-    meta_model="$("adapter_${ENGINE}_meta" model)"
-    meta_profile="$("adapter_${ENGINE}_meta" profile)"
-    meta_effort="$("adapter_${ENGINE}_meta" reasoning_effort)"
-  else
-    meta_model="${LOOP_ENGINNER_CODEX_MODEL:-${CLAUDE_MODEL:-—}}"
-    meta_profile="${LOOP_ENGINNER_CODEX_PROFILE:-—}"
-    meta_effort="${LOOP_ENGINNER_CODEX_REASONING_EFFORT:-—}"
-  fi
+  local cur="${ACTIVE_PROVIDER:-$ENGINE}"
+  local fb_chain="—"
+  [ "${#FALLBACK_PROVIDERS[@]}" -gt 1 ] && fb_chain="${FALLBACK_PROVIDERS[*]}"
 
   META=(
     [project]="$(basename "$(pwd)")"
     [engine]="$ENGINE"
-    [provider]="$ENGINE"
-    [model]="$meta_model"
-    [profile]="$meta_profile"
-    [reasoning_effort]="$meta_effort"
+    [provider]="$cur"
+    [model]="$(fallback_provider_meta "$cur" model)"
+    [profile]="$(fallback_provider_meta "$cur" profile)"
+    [reasoning_effort]="$(fallback_provider_meta "$cur" reasoning_effort)"
+    [fallback_chain]="$fb_chain"
     [verify_model]="${VERIFY_MODEL:-—}"
     [input]="$INPUT_FILE"
     [status]="running"
@@ -1228,7 +1244,7 @@ PREAMBLE
 # progresso por task fica parado ate o gate 3.
 # So faz sentido no claude: o codex nao expoe um stream equivalente.
 task_protocol_block() {
-  [[ "$ENGINE" == "claude" ]] || return 0
+  [[ "${ACTIVE_PROVIDER:-$ENGINE}" == "claude" ]] || return 0
   cat <<'PROTO'
 
 ## Protocolo de progresso (obrigatorio)
@@ -1400,7 +1416,7 @@ detect_usage_limit() {
   # O denominador comum e api_error_status 429 no JSON de resultado — casar so
   # a frase deixa o limite passar por gate 0 e queima todos os ciclos de
   # correcao em segundos, que e exatamente o que o invariante 4 evita.
-  if [[ "$ENGINE" == "claude" ]]; then
+  if [[ "${ACTIVE_PROVIDER:-$ENGINE}" == "claude" ]]; then
     pattern='usage limit reached|hit your (session|usage|[0-9]+-hour) limit|[0-9]+-hour limit reached|"api_error_status"[[:space:]]*:[[:space:]]*429'
   else
     pattern='rate limit reached|quota exceeded|usage limit reached|too many requests'
@@ -1484,82 +1500,129 @@ wait_for_reset() {
 # Engine
 # ---------------------------------------------------------------------------
 
-# run_engine <prompt_file> <log_file> <mode: impl|verify>
-# Loop de resiliencia a limite de uso: nao consome ciclo de correcao.
-run_engine() {
-  local prompt_file="$1" log_file="$2" mode="$3"
-
-  export LOOP_ENGINNER_ENGINE="$ENGINE"
-  export LOOP_ENGINNER_PROVIDER="$ENGINE"
-  export LOOP_ENGINNER_PHASE_MAX_ATTEMPTS="$MAX_CYCLES"
-
-  local model_args=()
-  if [[ "$mode" == "verify" ]] && [ -n "$VERIFY_MODEL" ]; then
-    model_args=(--model "$VERIFY_MODEL")
+_invoke_provider_cmd() {
+  local provider="$1" mode="$2" prompt_file="$3" verify_model="${4:-}"
+  local -a model_args=()
+  if [[ "$mode" == "verify" ]] && [ -n "$verify_model" ]; then
+    model_args=(--model "$verify_model")
   fi
 
-  while true; do
-    local rc=0
-
-    if [[ "$ENGINE" == "codex" ]]; then
-      # Observabilidade Codex: mesmo caminho do Claude — tee para o log + stream_watch para live.tsv
-      # O watcher lida com LOOP-TASK START/DONE (texto puro) e, quando houver JSON, com tool_use.
-      # Verify permanece sem watch (como no Claude) para não poluir o live com veredito.
+  case "$provider" in
+    codex)
       if [[ "$mode" == "verify" ]]; then
-        codex exec --sandbox read-only "${model_args[@]}" - < "$prompt_file" 2>&1 | tee "$log_file" || rc=$?
+        codex exec --sandbox read-only "${model_args[@]}" - < "$prompt_file" 2>&1
       else
-        local quiet=0
-        $DASHBOARD && quiet=1
-        if codex exec --sandbox danger-full-access - < "$prompt_file" 2>&1 | tee "$log_file" | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
-          rc=0
-        else
-          rc=$?
-        fi
+        codex exec --sandbox danger-full-access - < "$prompt_file" 2>&1
       fi
-    elif [[ "$ENGINE" == "claude" ]]; then
-      # < /dev/null: claude -p le stdin quando nao e TTY. Sem o redirect ele
-      # consome o stream de quem chamou (ex: o manifest do loop de fases).
+      ;;
+    claude)
       if [[ "$mode" == "verify" ]]; then
         env -u CLAUDECODE claude --dangerously-skip-permissions \
           "${model_args[@]}" \
           -p "$(cat "$prompt_file")" \
           --allowedTools "Read,Glob,Grep" \
-          --output-format text < /dev/null 2>&1 | tee "$log_file" || rc=$?
+          --output-format text < /dev/null 2>&1
       else
-        # stream-json: eventos linha a linha ENQUANTO a sessao roda — e o que
-        # da progresso por task ao painel. O JSON de resultado continua sendo a
-        # ultima linha, com "type":"result" e is_error: o gate 0 nao muda.
-        # O exit code do CLI e sinal fraco; quem decide e o gate 0.
-        local quiet=0
-        $DASHBOARD && quiet=1
-        if env -u CLAUDECODE claude --dangerously-skip-permissions \
-             -p "$(cat "$prompt_file")" \
-             --output-format stream-json --verbose < /dev/null 2>&1 \
-             | tee "$log_file" \
-             | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
-          rc=0
-        else
-          rc=$?
-        fi
+        env -u CLAUDECODE claude --dangerously-skip-permissions \
+          -p "$(cat "$prompt_file")" \
+          --output-format stream-json --verbose < /dev/null 2>&1
       fi
+      ;;
+    *)
+      "adapter_${provider}_run" "$mode" "$prompt_file" "$verify_model"
+      ;;
+  esac
+}
+
+_exec_with_pid() {
+  local pid_file="$1"
+  shift
+  if [ -n "$pid_file" ]; then
+    printf '%s\n' "$BASHPID" > "$pid_file"
+  fi
+  _invoke_provider_cmd "$@"
+}
+
+# run_engine <prompt_file> <log_file> <mode: impl|verify>
+# Loop de resiliencia: fallback configuravel por provider ou espera por reset.
+run_engine() {
+  local prompt_file="$1" log_file="$2" mode="$3"
+
+  export LOOP_ENGINNER_ENGINE="$ENGINE"
+  export LOOP_ENGINNER_PHASE_MAX_ATTEMPTS="$MAX_CYCLES"
+
+  while true; do
+    local cur_provider="${ACTIVE_PROVIDER:-$ENGINE}"
+    local eff_verify_model="${LOOP_ENGINNER_VERIFY_MODEL:-}"
+    if [ -z "$eff_verify_model" ] && [ "$cur_provider" = "claude" ]; then
+      eff_verify_model="sonnet"
+    fi
+
+    export LOOP_ENGINNER_PROVIDER="$cur_provider"
+
+    local rc=0 stalled=0 stamp="" wd_pid="" pid_file="" wd_limit
+    if fallback_watchdog_active_for "$cur_provider"; then
+      stamp="$(mktemp -u)"
+      pid_file="$stamp.pid"
+      : > "$log_file"
+      wd_limit="$(fallback_provider_inactivity_timeout "$cur_provider")"
+      wd_pid="$(fallback_watchdog_start "$log_file" "$stamp" "$wd_limit")"
+    fi
+
+    if [[ "$mode" == "verify" ]]; then
+      _exec_with_pid "$pid_file" "$cur_provider" verify "$prompt_file" "$eff_verify_model" \
+        | tee "$log_file" || rc=$?
     else
-      if [[ "$mode" == "verify" ]]; then
-        "adapter_${ENGINE}_run" verify "$prompt_file" "$VERIFY_MODEL" | tee "$log_file" || rc=$?
+      local quiet=0
+      $DASHBOARD && quiet=1
+      if _exec_with_pid "$pid_file" "$cur_provider" impl "$prompt_file" "" \
+           | tee "$log_file" \
+           | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
+        rc=0
       else
-        local quiet=0
-        $DASHBOARD && quiet=1
-        if "adapter_${ENGINE}_run" impl "$prompt_file" "" \
-             | tee "$log_file" \
-             | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
-          rc=0
-        else
-          rc=$?
-        fi
+        rc=$?
       fi
     fi
 
+    if [ -n "$wd_pid" ]; then
+      fallback_watchdog_stop "$wd_pid" "$stamp"
+      if [ -f "$stamp.stalled" ]; then
+        stalled=1
+        warn "Provider '$cur_provider' sem progresso util ha $(cat "$stamp.stalled")s (limite ${wd_limit}s)."
+      fi
+      rm -f "$stamp".*
+    fi
+
+    if [ "${#FALLBACK_PROVIDERS[@]}" -gt 1 ]; then
+      local fb_reason=""
+      if fb_reason="$(fallback_should_escalate "$cur_provider" "$rc" "$log_file" "$stalled")"; then
+        if [ $((FALLBACK_INDEX + 1)) -lt "${#FALLBACK_PROVIDERS[@]}" ]; then
+          cp "$log_file" "${log_file%.log}.fallback-${cur_provider}.log" 2>/dev/null || true
+          : > "$log_file"
+          FALLBACK_INDEX=$((FALLBACK_INDEX + 1))
+          ACTIVE_PROVIDER="${FALLBACK_PROVIDERS[$FALLBACK_INDEX]}"
+          state_sync_provider
+          state_flush
+          warn "Provider '$cur_provider' indisponivel ($fb_reason); escalando para '$ACTIVE_PROVIDER'."
+          emit_hook provider_fallback "$cur_provider -> $ACTIVE_PROVIDER ($fb_reason)"
+          history_record provider_fallback "${LOOP_ENGINNER_PHASE_NUM:-0}" "$cur_provider -> $ACTIVE_PROVIDER ($fb_reason)"
+          continue
+        fi
+        fail "Cadeia de fallback esgotada (${FALLBACK_PROVIDERS[*]}) apos falha em '$cur_provider' ($fb_reason)."
+        [ "$stalled" -eq 1 ] && [ "$rc" -eq 0 ] && rc=124
+        return "$rc"
+      fi
+      [ "$stalled" -eq 1 ] && [ "$rc" -eq 0 ] && rc=124
+      return "$rc"
+    fi
+
+    if [ "$stalled" -eq 1 ]; then
+      [ "$rc" -eq 0 ] && rc=124
+      return "$rc"
+    fi
+
     local reset_epoch
-    if is_adapter_engine "$ENGINE"; then
+    if is_adapter_engine "$cur_provider"; then
       if [ "$rc" -ne 0 ] && reset_epoch=$(detect_usage_limit "$log_file"); then
         wait_for_reset "$reset_epoch"
         continue
@@ -1583,8 +1646,9 @@ GATE_CAUSE=""
 
 gate0_engine_finished() {
   local log_file="$1" rc="$2"
+  local cur_provider="${ACTIVE_PROVIDER:-$ENGINE}"
 
-  if [[ "$ENGINE" == "claude" ]]; then
+  if [[ "$cur_provider" == "claude" ]]; then
     # is_error tem que sair do EVENTO DE RESULTADO, nunca do log inteiro.
     # Com --output-format stream-json o log carrega toda a conversa, e um
     # tool_result de ferramenta que falhou (um grep sem match, um teste
@@ -1603,8 +1667,8 @@ gate0_engine_finished() {
       GATE_CAUSE="O engine reportou is_error=true no resultado. Ultimas linhas do output:"$'\n'"$(tail -n 40 "$log_file")"
       return 1
     fi
-  elif is_adapter_engine "$ENGINE" && declare -F "adapter_${ENGINE}_gate0" >/dev/null 2>&1; then
-    "adapter_${ENGINE}_gate0" "$log_file" "$rc"
+  elif is_adapter_engine "$cur_provider" && declare -F "adapter_${cur_provider}_gate0" >/dev/null 2>&1; then
+    "adapter_${cur_provider}_gate0" "$log_file" "$rc"
     return $?
   fi
 

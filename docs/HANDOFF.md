@@ -1,43 +1,34 @@
 # HANDOFF — continuação via Antigravity (agy)
 
-Gerado em 2026-11-18, atualizado na Fase A2 (v0.3.0).
-Destinatário: próximo agente (Antigravity) e o humano que o conduz.
+Gerado em 2026-11-18, atualizado na Fase A3 (v0.4.0).
+Destinatário: próximo agente e o humano que o conduz.
 
 ## Como retomar em 2 minutos
 
 ```bash
 cd loop-enginner
-bash tests/run-tests.sh        # baseline: 5 passaram, 0 falharam
-agy
+bash tests/run-tests.sh        # baseline: 6 passaram, 0 falharam
 ```
 
-Primeiro prompt sugerido no agy:
-
-```text
-/goal Leia AGENTS.md, docs/STATUS.md e docs/HANDOFF.md. Execute a Fase A3
-(cadeia de fallback configurável) respeitando as invariantes do AGENTS.md e
-a decisão fechada (sem LOOP_ENGINNER_FALLBACK_CHAIN roda só --engine; 'auto'
-detecta engines instaladas em runtime; cadeia explícita é fail-closed no
-preflight): baseline verde antes e depois, testes somente com mock, commits
-em pt-BR sem Co-Authored-By. Pare e pergunte se alguma decisao fechada
-precisar mudar.
-```
-
-Se preferir validar o entendimento antes: troque `/goal` por `/grill-me`.
+Após revisar os commits em `dev`, promover para `main` e publicar quando
+aprovado (ou abrir nova fase a partir de `dev`).
 
 ## Onde paramos
 
 O projeto nasceu como fork agnóstico e desacoplado do `ralph.sh` + `ralph-watch.sh`
-(detalhes em [STATUS.md](STATUS.md) e `NOTICE`). Na **Fase A1 (v0.2.0)** foi
-criada a seam `adapters/` e entregue o adapter **Antigravity (`agy`)** em
-`adapters/agy.sh`. Na **Fase A2 (v0.3.0)** foi entregue o adapter
-**OpenCode (`opencode`)** em `adapters/opencode.sh`, integrado a `lib/loop.sh`,
-`lib/loop-watch.sh`, `bin/loop-enginner` (`doctor` e `status`) e coberto por
-`tests/test-adapter-opencode.sh` com mock.
+(detalhes em [STATUS.md](STATUS.md) e `NOTICE`). Toda a **Fase A** (A1 + A2 + A3)
+foi concluída localmente em `dev`, mantendo `main` intacta em `1844d63` até
+a revisão final:
+
+- **Fase A1 (`v0.2.0`):** seam `adapters/` + adapter Antigravity (`adapters/agy.sh`).
+- **Fase A2 (`v0.3.0`):** adapter OpenCode (`adapters/opencode.sh`).
+- **Fase A3 (`v0.4.0`):** cadeia de fallback configurável + vigia de progresso
+  por provider (`lib/fallback.sh`, `--fallback-chain` / `LOOP_ENGINNER_FALLBACK_CHAIN`,
+  guarda absoluta de exit code), coberta por `tests/test-fallback.sh` (`6/6`).
 
 Repositório remoto publicado em `https://github.com/nandinhos/loop-enginner.git`
-(público, branches `main` e `dev`, topologia Clássico `dev -> main`); ainda sem
-install global nesta máquina e sem run com engine real neste fork.
+(público, topologia Clássico `dev -> main`); ainda sem install global nesta
+máquina e sem run com engine real neste fork.
 
 ## Próxima tarefa — Fase A: adapters de provider no fallback
 
@@ -71,20 +62,19 @@ com seus testes antes do próximo:
 - `bin/loop-enginner` (`doctor`/`status`), `lib/loop.sh`, `lib/loop-watch.sh`
   e `tests/test-adapter-opencode.sh` verdes (`5/5`).
 
-### A3 — Cadeia de fallback configurável — próxima
+### A3 — Cadeia de fallback configurável — ✅ Concluída (v0.4.0)
 
-- Decisão fechada (opção 1): sem `LOOP_ENGINNER_FALLBACK_CHAIN`, roda apenas
-  `--engine` (sem fallback surpresa); com `LOOP_ENGINNER_FALLBACK_CHAIN=auto`,
-  usa as engines instaladas detectadas em runtime; com cadeia explícita
-  (ex.: `LOOP_ENGINNER_FALLBACK_CHAIN="codex agy opencode"`), falha alto no
-  preflight se faltar algum degrau (fail-closed). A engine primária continua
-  vindo de `--engine`.
-- **Gatilhos só com prova:** quota, limite de uso, autenticação,
-  indisponibilidade, travamento sem progresso. Regra herdada: regex de
-  gatilho nova exige reprodução + teste — e o padrão só é consultado
-  **depois** de a sessão falhar, nunca sobre texto comum de log (em
-  2026-09-06 um fallback disparou porque o agente apenas *leu* um arquivo
-  contendo as expressões).
+- Implementada em `lib/fallback.sh` e integrada a `lib/loop.sh` (`--fallback-chain`
+  / `LOOP_ENGINNER_FALLBACK_CHAIN`), `lib/loop-watch.sh` (`Provider:` destacado em
+  fallback) e `bin/loop-enginner` (`doctor` e `status` com `engine=`/`provider=`).
+- Resolução da cadeia (Opção 1): vazio = apenas `--engine`; `auto` = engines
+  detectadas em runtime no `PATH`; explícita = fail-closed no preflight se
+  algum degrau estiver ausente ou inválido.
+- Guarda absoluta pós-falha (`fallback_should_escalate`): `rc == 0` (ou `claude`
+  sem `is_error`) nunca escala mesmo que texto do padrão apareça no log.
+- Vigia de inatividade por provider (`streaming` vs `batch`): encerra processo
+  travado sem matar providers `batch` legítimos (`agy`/`opencode`).
+- Coberta por `tests/test-fallback.sh` (`6/6` suítes verdes).
 
 ### Critérios de aceite por fase (A1/A2/A3)
 
