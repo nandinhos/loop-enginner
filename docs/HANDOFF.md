@@ -1,13 +1,13 @@
 # HANDOFF — continuação via Antigravity (agy)
 
-Gerado em 2026-11-18, atualizado na Fase B (`v0.5.0`, 2026-11-19).
+Gerado em 2026-11-18, atualizado na Fase C (`v0.6.0`, 2026-11-19).
 Destinatário: próximo agente e o humano que o conduz.
 
 ## Como retomar em 2 minutos
 
 ```bash
 cd loop-enginner
-bash tests/run-tests.sh        # baseline: 9 passaram, 0 falharam
+bash tests/run-tests.sh        # baseline: 10 passaram, 0 falharam
 ```
 
 Após revisar os commits em `dev` (`origin/dev..dev`), promover para `main`,
@@ -15,11 +15,8 @@ publicar (`git push`) e rodar `./install-global.sh` quando aprovado.
 
 ## Onde paramos
 
-Toda a **Fase A** (`v0.2.0`–`v0.4.0`: adapters `agy`/`opencode` + cadeia de
-fallback configurável) e toda a **Fase B** (`v0.5.0`: visor de gates dividido,
-Debug Sistemático, retomada segura, pausa graciosa, monitor/supervisor de
-continuidade com até 3 retomadas e relatório estilizado pós-conclusão) estão
-implementadas e verdes em `dev`:
+Toda a **Fase A** (`v0.2.0`–`v0.4.0`), toda a **Fase B** (`v0.5.0`) e toda a
+**Fase C** (`v0.6.0`) estão implementadas, commitadas e verdes em `dev`:
 
 - **Fase A1 (`v0.2.0`):** seam `adapters/` + adapter Antigravity (`adapters/agy.sh`).
 - **Fase A2 (`v0.3.0`):** adapter OpenCode (`adapters/opencode.sh`).
@@ -27,6 +24,13 @@ implementadas e verdes em `dev`:
 - **Fase B1 (`v0.5.0`):** rodapé dividido `LOGS RECENTES` \| `GATES (FASE N)` em `lib/loop-watch.sh` e `G0 run` em `lib/loop.sh`.
 - **Fase B2 (`v0.5.0`):** `lib/recovery.sh` com `run.lock`, `resume` seguro, Debug Sistemático (Context7 + memória opcional não bloqueante), pausa graciosa (`pause` e tecla `p`) e cleanup em `on_exit`.
 - **Fase B3 (`v0.5.0`):** `lib/supervisor.sh` (ativo por padrão no `run`, `--no-supervise` opcional, 3 retomadas, trava silenciosa) e `lib/report.sh` (relatório `.md` e terminal estilizado com parsing factual de tokens).
+- **Fase C (`v0.6.0`):**
+  - `lib/loop-watch.sh`: enquadramento vertical dinâmico (banner compacto em $H<34$, conciso em $34 \le H < 48$ e full em $H \ge 48$), largura da tabela alinhada em $W-1$ (zero quebra espúria), orçamento dinâmico entre tabela e rodapé sem paginação desnecessária quando tarefas cabem na tela, e trava no mouse wheel/`scroll_by` quando $MAX\_OFF = 0$.
+  - `lib/loop-watch.sh`: barra de progresso visual nos gates (`Progresso: [████████░░░░] 50% (2/4)`).
+  - `adapters/agy.sh` e `adapters/opencode.sh`: descoberta dinâmica de modelos (`agy models`, `opencode models`) e níveis de raciocínio.
+  - `bin/loop-enginner config`: assistente interativo em 5 passos para salvar `.loop-enginner/config.env`, além de flags `--menu` / `-i` / `--config` no `loop-enginner run`.
+  - `lib/loop.sh`: carregamento automático de `config.env` com precedência explícita de flags CLI (`--model`, `--effort`).
+  - `tests/test-config.sh`: nova suíte com 10/10 suítes verdes.
 
 Validação ao vivo já realizada pelo dono com `agy` real em `/tmp/loop-enginner-demo`
 (branch `demo-agy-opencode`, 2 fases concluídas ponta a ponta em `v0.4.0`).
