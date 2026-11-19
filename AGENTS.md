@@ -58,7 +58,7 @@ Runner de loops estruturados e autônomos sobre qualquer repo Git:
 | Caminho | O que é |
 |---|---|
 | `bin/loop-enginner` | CLI (install/uninstall/new/run/watch/status/doctor) |
-| `adapters/` | Adapters de provider por contrato de sessão (`agy.sh`, …) |
+| `adapters/` | Adapters de provider por contrato de sessão (`agy.sh`, `opencode.sh`, …) |
 | `lib/loop.sh` | Núcleo do loop (preflight, gates 0–3, sessões, commits) |
 | `lib/loop-watch.sh` | Painel de terminal (leitor puro do estado TSV) |
 | `install-global.sh` | Symlink em `~/.local/bin` (máquina), com `--uninstall` |

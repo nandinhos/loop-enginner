@@ -4,7 +4,7 @@
 # no NOTICE, licenca MIT no LICENSE da raiz do projeto).
 #
 # Orquestrador que le um documento de fases, quebra em fases, e alimenta cada
-# uma ao Codex CLI, Claude Code ou Antigravity (agy) para implementacao automatica.
+# uma ao Codex CLI, Claude Code, Antigravity (agy) ou OpenCode (opencode) para implementacao automatica.
 #
 # Invariantes:
 #   1. Cada fase E cada ciclo de correcao roda em sessao NOVA, com prompt
@@ -23,7 +23,7 @@
 #   ./loop.sh [opcoes] [caminho-do-arquivo]
 #
 # Opcoes:
-#   --engine codex|claude|agy  engine de implementacao (default: codex)
+#   --engine codex|claude|agy|opencode  engine de implementacao (default: codex)
 #   --from N                 comeca na fase N (limpa do progresso as fases >= N)
 #   --keep-going             continua apos uma fase falhar (default: para)
 #   --max-cycles N           ciclos de correcao por fase (default: 3)
@@ -40,7 +40,7 @@
 #   No engine claude a sessao roda com --output-format stream-json, o que da
 #   progresso POR TASK em tempo real: o prompt manda o agente registrar uma
 #   tarefa por item `- [ ]` da fase, e o loop-enginner le essas transicoes do stream.
-#   No codex nao ha stream equivalente e o agy roda em batch: granularidade por fase.
+#   No codex nao ha stream equivalente; agy/opencode rodam em batch (por fase).
 #
 # Input (primeiro arquivo posicional). Sem argumento, resolve nesta ordem:
 #   1. .loop-enginner/PHASES.md
@@ -57,7 +57,7 @@
 #   - qualquer outro `## ` encerra a captura da fase anterior
 #
 # Gates por fase (todos verdes -> commit; qualquer vermelho -> ciclo de correcao):
-#   0. engine terminou de verdade (claude: is_error no JSON; codex/agy: exit code)
+#   0. engine terminou de verdade (claude: is_error no JSON; demais: exit code)
 #   1. a sessao escreveu codigo? SINAL, nao veredito — uma fase ja implementada
 #      faz o engine (corretamente) nao escrever nada. Alimenta a causa do ciclo
 #      de correcao quando um gate posterior reprova.
@@ -103,10 +103,16 @@
 #   LOOP_ENGINNER_AGY_EFFORT         esforco opcional: low|medium|high|xhigh|max
 #   LOOP_ENGINNER_AGY_PRINT_TIMEOUT  timeout do agy --print (default: 30m)
 #   LOOP_ENGINNER_AGY_INACTIVITY_TIMEOUT limite de silencio do agy (default: herda PRINT_TIMEOUT)
+#   LOOP_ENGINNER_OPENCODE_BIN       binario/comando do OpenCode (default: opencode)
+#   LOOP_ENGINNER_OPENCODE_MODEL     modelo opcional (provider/model) para --engine opencode
+#   LOOP_ENGINNER_OPENCODE_VARIANT   variante opcional de esforco (ex: high, max, minimal)
+#   LOOP_ENGINNER_OPENCODE_AGENT     agente opcional para o modo impl no opencode
+#   LOOP_ENGINNER_OPENCODE_VERIFY_AGENT agente read-only no verify (default: plan)
+#   LOOP_ENGINNER_OPENCODE_INACTIVITY_TIMEOUT limite de silencio do opencode (default: 900s)
 #
 # Exportadas para hooks (ex: hook de notificacao) durante cada sessao de engine:
-#   LOOP_ENGINNER_ENGINE             codex | claude | agy
-#   LOOP_ENGINNER_PROVIDER           provider efetivo da sessao (ex: agy)
+#   LOOP_ENGINNER_ENGINE             codex | claude | agy | opencode
+#   LOOP_ENGINNER_PROVIDER           provider efetivo da sessao (ex: agy, opencode)
 #   LOOP_ENGINNER_PHASE_TITLE        titulo da fase corrente
 #   LOOP_ENGINNER_PHASE_NUM          numero da fase corrente
 #   LOOP_ENGINNER_PHASE_TOTAL        total de fases do run
@@ -126,6 +132,7 @@
 #   - Codex: npm install -g @openai/codex + OPENAI_API_KEY
 #   - Claude: npm install -g @anthropic-ai/claude-code + ANTHROPIC_API_KEY
 #   - Antigravity: agy CLI instalado e logado no PATH
+#   - OpenCode: opencode CLI instalado no PATH
 #   - Raiz de um repo git, com a arvore de trabalho limpa
 
 set -euo pipefail
@@ -479,7 +486,7 @@ resolve_test_cmd() {
 
 preflight_checks() {
   if [[ "$ENGINE" != "codex" && "$ENGINE" != "claude" ]] && ! is_adapter_engine "$ENGINE"; then
-    fail "Engine invalida: $ENGINE. Use 'codex', 'claude' ou 'agy'."
+    fail "Engine invalida: $ENGINE. Use 'codex', 'claude', 'agy' ou 'opencode'."
     exit 1
   fi
 

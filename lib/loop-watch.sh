@@ -95,8 +95,8 @@ watch_process_count() {
         args[pid] ~ /(^|[[:space:]])loop-enginner([[:space:]]|$)/
     }
     function provider_process(pid) {
-      return (comm[pid] == "codex" || comm[pid] == "claude" || comm[pid] == "agy" ||
-        args[pid] ~ /(^|[[:space:]])(codex|claude|agy)([[:space:]]|$)/ ||
+      return (comm[pid] == "codex" || comm[pid] == "claude" || comm[pid] == "agy" || comm[pid] == "opencode" ||
+        args[pid] ~ /(^|[[:space:]])(codex|claude|agy|opencode)([[:space:]]|$)/ ||
         args[pid] ~ /codex-linux-x64/)
     }
     function has_loop_parent(pid, parent) {

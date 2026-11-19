@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## v0.3.0 — 2026-11-18
+
+Fase A2 — Adapter OpenCode (`opencode`) atrás da seam `adapters/`:
+
+- `adapters/opencode.sh`: adapter de provider para `opencode` com modo `impl`
+  (`opencode run --auto`), modo `verify` read-only (`--agent plan`, sem `--auto`),
+  prompt via `stdin`, configuração via `LOOP_ENGINNER_OPENCODE_*` e timeout
+  `batch` por provider (`LOOP_ENGINNER_OPENCODE_INACTIVITY_TIMEOUT`, default `900s`).
+- `lib/loop.sh`: suporte e documentação de `--engine opencode` e variáveis
+  `LOOP_ENGINNER_OPENCODE_*` no cabeçalho e `preflight_checks`.
+- `lib/loop-watch.sh`: detecção de processos `opencode` em `watch_process_count`.
+- `bin/loop-enginner`: `doctor` valida `adapters/opencode.sh` e detecta
+  `codex|claude|agy|opencode` no `PATH`; `status` exibe `opencode`.
+- `tests/test-adapter-opencode.sh`: cobertura com mock de `impl` + Gate 2 +
+  Gate 3 (`--agent plan`), `doctor`/`status`, timeout `batch` e unhappy paths.
+- `templates/config.env.example`: variáveis `LOOP_ENGINNER_OPENCODE_*` documentadas.
+
 ## v0.2.0 — 2026-11-18
 
 Fase A1 — Adapter Antigravity (`agy`) atrás da seam `adapters/`:
