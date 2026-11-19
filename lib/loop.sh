@@ -1860,6 +1860,8 @@ run_phase() {
     fi
 
     sig_before=$(tree_signature)
+    state_gate "$phase_num" 0 run
+    state_meta activity "executando sessao do engine (${ACTIVE_PROVIDER:-$ENGINE})"
     run_engine "$prompt_file" "$log_file" impl || rc=$?
 
     state_absorb_live "$phase_num"
@@ -1893,7 +1895,12 @@ run_phase() {
       if [ "$session_wrote" -eq 1 ]; then state_gate "$phase_num" 1 pass
       else state_gate "$phase_num" 1 skip; fi
 
-      if [ -n "$TEST_CMD" ]; then state_gate "$phase_num" 2 run; else state_gate "$phase_num" 2 skip; fi
+      if [ -n "$TEST_CMD" ]; then
+        state_gate "$phase_num" 2 run
+        state_meta activity "rodando suite de testes ($TEST_CMD)"
+      else
+        state_gate "$phase_num" 2 skip
+      fi
 
       if ! gate2_tests_pass "$LOG_DIR/${phase_file%.md}.test-${cycle}.log"; then
         state_gate "$phase_num" 2 fail
@@ -1904,8 +1911,12 @@ run_phase() {
         gate_verdict="red"
       else
         [ -n "$TEST_CMD" ] && state_gate "$phase_num" 2 pass
-        state_gate "$phase_num" 3 run
-        state_meta activity "verificador independente lendo o codigo"
+        if [ "$VERIFY_MODE" != "off" ]; then
+          state_gate "$phase_num" 3 run
+          state_meta activity "verificador independente lendo o codigo"
+        else
+          state_gate "$phase_num" 3 skip
+        fi
 
         if ! gate3_independent_verify "$phase_file" "$cycle" "$session_wrote"; then
           state_tasks_from_verify "$phase_num" "$verify_log"

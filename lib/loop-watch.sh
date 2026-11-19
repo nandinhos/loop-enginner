@@ -490,10 +490,18 @@ calc_height() {
 # As versoes _v nao levam o \n final: quem monta os dois boxes lado a lado
 # precisa das bordas como texto, nao como linha impressa.
 box_top_v() { # <destino> <largura> <titulo>
-  local __w="$2" __title="$3" __pre __l __r
+  local __w="$2" __title="$3" __max_t __pre __rem __l __r
+  __max_t=$(( __w - 2 ))
+  [ "$__max_t" -lt 0 ] && __max_t=0
+  if [ "${#__title}" -gt "$__max_t" ]; then
+    if [ "$__max_t" -gt 1 ]; then __title="${__title:0:__max_t-1}…"; else __title="${__title:0:__max_t}"; fi
+  fi
   __pre=$(( (__w - ${#__title} - 2) / 2 ))
+  [ "$__pre" -lt 0 ] && __pre=0
+  __rem=$(( __w - __pre - ${#__title} - 2 ))
+  [ "$__rem" -lt 0 ] && __rem=0
   repeat_v __l '─' "$__pre"
-  repeat_v __r '─' $(( __w - __pre - ${#__title} - 2 ))
+  repeat_v __r '─' "$__rem"
   printf -v "$1" '%s%s┌%s %s%s%s %s┐%s' \
     "$C_SURFACE" "$C_BORDER" "$__l" "$C_PRIMARY" "$__title" "$C_BORDER" "$__r" "$C_LINE_RESET"
 }
@@ -852,16 +860,11 @@ build_frame() {
   calc_height
   build_rows
 
-  # Reserva o rodape de logs quando a janela comporta a informacao sem
-  # sacrificar a leitura minima da tabela.
-  # O painel mostra onze linhas de historico em terminais normais. Em telas
-  # baixas, reduzimos a reserva para manter tabela e cabecalho responsivos.
+  # Reserva o rodape dividido (LOGS RECENTES | GATES) quando a janela comporta
+  # a informacao sem sacrificar a leitura minima da tabela.
   LOG_PANEL_LINES=13
-  [ "$H" -lt 24 ] && LOG_PANEL_LINES=4
+  [ "$H" -lt 24 ] && LOG_PANEL_LINES=7
   [ "$H" -lt 20 ] && LOG_PANEL_LINES=0
-  if $ONCE && [ ! -f "$(current_log_file)" ]; then
-    LOG_PANEL_LINES=0
-  fi
 
   HEAD=$(draw_header; draw_panels)
   TOTAL=${#ROWS[@]}
@@ -985,42 +988,278 @@ current_log_file() {
   printf '%s/phase-%02d.cycle-%s.log' "$LOG_DIR" "$phase" "$cycle"
 }
 
+resolve_footer_log_file() {
+  local f newest=""
+  f="$(current_log_file)"
+  if [ -n "$f" ] && [ -s "$f" ]; then
+    printf '%s' "$f"
+    return 0
+  fi
+  for f in "$LOG_DIR"/phase-*.log; do
+    [ -s "$f" ] || continue
+    if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
+      newest="$f"
+    fi
+  done
+  if [ -n "$newest" ]; then
+    printf '%s' "$newest"
+    return 0
+  fi
+  if [ -s "$LOG_DIR/loop.log" ]; then
+    printf '%s/loop.log' "$LOG_DIR"
+  fi
+}
+
 log_is_error() {
   printf '%s\n' "$1" | grep -qiE 'error|failed|falhou|exception|traceback|rejected|incomplete|timeout|blocked|recovery_required|exit[ =:-]+[1-9]'
 }
 
-draw_log_panel() {
-  [ "$LOG_PANEL_LINES" -gt 0 ] || return 0
+gates_target_phase() {
+  local cur="${META[phase_cur]:-}" num candidate=""
+  if [ -n "$cur" ] && [ -n "${PH_GATES[$cur]+x}" ]; then
+    printf '%s' "$cur"
+    return 0
+  fi
+  for num in "${PHASE_NUMS[@]}"; do
+    case "${PH_STATUS[$num]:-pending}" in
+      running|failed|done) candidate="$num" ;;
+    esac
+  done
+  if [ -n "$candidate" ]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  if [ "${#PHASE_NUMS[@]}" -gt 0 ]; then
+    printf '%s' "${PHASE_NUMS[$((${#PHASE_NUMS[@]} - 1))]}"
+  fi
+}
 
-  local top bot panel_width body_width log_file line plain rendered color
-  # Deixe uma coluna de seguranca: imprimir o canto na ultima coluna pode
-  # disparar o auto-wrap do terminal antes de o caractere chegar na tela.
-  panel_width=$((W - 1))
-  # box_*_v recebe a largura interna; a linha do corpo tem duas bordas e um
-  # espaco interno, portanto seu texto ocupa panel_width-3 colunas.
-  body_width=$((panel_width - 3))
-  log_file=$(current_log_file)
-  box_top_v top "$((panel_width - 2))" 'LOGS RECENTES'
-  printf '%s\n' "$top"
+gate_panel_sym() {
+  case "$1" in
+    pass) printf '✓' ;;
+    fail) printf '✗' ;;
+    run)  printf '▶' ;;
+    skip) printf '–' ;;
+    *)    printf '·' ;;
+  esac
+}
 
-  # Um log criado antes da sessão começar pode existir com zero bytes. Trate-o
-  # como ausência de saída para manter o corpo do painel visível.
+gate_row_color() {
+  case "$1" in
+    pass) printf '%s' "$C_GREEN" ;;
+    fail) printf '%s' "$C_RED" ;;
+    run)  printf '%s' "$C_RUNNING" ;;
+    skip) printf '%s' "$C_SKIPPED" ;;
+    *)    printf '%s' "$C_MUTED" ;;
+  esac
+}
+
+gate_short_name() {
+  case "$1" in
+    0) printf 'G0 Engine' ;;
+    1) printf 'G1 Escrita' ;;
+    2) printf 'G2 Testes' ;;
+    3) printf 'G3 Verificador' ;;
+    *) printf 'G%s' "$1" ;;
+  esac
+}
+
+gate_detail_text() {
+  local idx="$1" st="$2"
+  case "$idx:$st" in
+    0:pending) printf 'Sessão do engine (aguardando)' ;;
+    0:run)     printf 'Executando sessão (%s)' "${META[provider]:-${META[engine]:-engine}}" ;;
+    0:pass)    printf 'Sessão concluiu sem erro' ;;
+    0:fail)    printf 'Engine falhou ou abortou' ;;
+    0:skip)    printf 'Pulado' ;;
+    1:pending) printf 'Verifica alterações na árvore' ;;
+    1:run)     printf 'Verificando diff na árvore' ;;
+    1:pass)    printf 'Alterações detectadas no repo' ;;
+    1:fail)    printf 'Falha na checagem de escrita' ;;
+    1:skip)    printf 'Sem escrita (valida HEAD)' ;;
+    2:pending) printf 'Suíte externa de testes' ;;
+    2:run)     printf 'Rodando testes (%s)' "${META[test_cmd]:-suite}" ;;
+    2:pass)    printf 'Suíte de testes verde' ;;
+    2:fail)    printf 'Suíte de testes falhou' ;;
+    2:skip)    printf 'Sem comando de teste' ;;
+    3:pending) printf 'Revisão read-only task a task' ;;
+    3:run)     printf 'Auditando tasks (read-only)' ;;
+    3:pass)    printf 'Todas as tasks confirmadas' ;;
+    3:fail)    printf 'Tasks incompletas detectadas' ;;
+    3:skip)    printf 'Verificação pulada' ;;
+    *)         printf '%s' "$st" ;;
+  esac
+}
+
+# Constroi linhas coloridas e em texto puro dos dois paineis inferiores em arrays globais.
+collect_log_rows() { # <rows> <inner_width>
+  local max_rows="$1" width="$2" log_file line plain color
+  BOTTOM_L_RENDERED=()
+  log_file="$(resolve_footer_log_file)"
   if [ -n "$log_file" ] && [ -s "$log_file" ]; then
     while IFS= read -r line; do
       plain=$(printf '%s' "$line" | sed $'s/\033\\[[0-9;]*[mK]//g')
-      pad_v plain "$plain" "$body_width"
+      pad_v plain "$plain" "$width"
       color="$C_WHITE"
       log_is_error "$line" && color="$C_RED"
-      rendered="${color}${plain}${C_RESET}"
-      printf '%s%s│%s %s%s│%s\n' "$C_SURFACE" "$C_BORDER" "$C_RESET" "$rendered" "$C_BORDER" "$C_LINE_RESET"
-    done < <(tail -n "$((LOG_PANEL_LINES - 2))" "$log_file")
+      BOTTOM_L_RENDERED+=("${color}${plain}${C_RESET}")
+    done < <(tail -n "$max_rows" "$log_file")
   else
-    pad_v plain 'aguardando saída da sessão atual' "$body_width"
-    printf '%s%s│%s %s%s%s%s│%s\n' "$C_SURFACE" "$C_BORDER" "$C_RESET" "$C_GREY" "$plain" "$C_RESET" "$C_BORDER" "$C_LINE_RESET"
+    pad_v plain 'aguardando saída da sessão atual' "$width"
+    BOTTOM_L_RENDERED+=("${C_GREY}${plain}${C_RESET}")
+  fi
+  while [ "${#BOTTOM_L_RENDERED[@]}" -lt "$max_rows" ]; do
+    pad_v plain '' "$width"
+    BOTTOM_L_RENDERED+=("$plain")
+  done
+}
+
+build_gate_rendered_row() { # <dst> <width> <idx> <status>
+  local __width="$2" __idx="$3" __st="$4"
+  local __sym __name __det __sc __nc __dc __prefix __max_d __dfit __plain __pfit
+  __sym="$(gate_panel_sym "$__st")"
+  __name="$(gate_short_name "$__idx")"
+  __det="$(gate_detail_text "$__idx" "$__st")"
+  __sc="$(gate_row_color "$__st")"
+  __nc="$C_TEXT_PRIMARY"
+  [ "$__st" = "pending" ] && __nc="$C_MUTED"
+  [ "$__st" = "skip" ] && __nc="$C_SKIPPED"
+  __dc="$C_TEXT_SECONDARY"
+  [ "$__st" = "run" ] && __dc="$C_RUNNING"
+  [ "$__st" = "fail" ] && __dc="$C_DANGER"
+  [ "$__st" = "pass" ] && __dc="$C_TEXT_PRIMARY"
+  [ "$__st" = "pending" ] && __dc="$C_MUTED"
+
+  __prefix="$__sym $__name · "
+  __max_d=$(( __width - ${#__prefix} ))
+  if [ "$__max_d" -ge 6 ]; then
+    pad_v __dfit "$__det" "$__max_d"
+    printf -v "$1" '%s%s%s %s%s%s %s·%s %s%s%s' \
+      "$__sc" "$__sym" "$C_RESET" \
+      "$__nc" "$__name" "$C_RESET" \
+      "$C_MUTED" "$C_RESET" \
+      "$__dc" "$__dfit" "$C_RESET"
+  else
+    __plain="${__prefix}${__det}"
+    pad_v __pfit "$__plain" "$__width"
+    printf -v "$1" '%s%s%s' "$__sc" "$__pfit" "$C_RESET"
+  fi
+}
+
+collect_gate_rows() { # <rows> <inner_width>
+  local max_rows="$1" width="$2" target="$3"
+  BOTTOM_R_RENDERED=()
+  local spec=""
+  [ -n "$target" ] && spec="${PH_GATES[$target]:-pending pending pending pending}"
+  [ -z "$spec" ] && spec="pending pending pending pending"
+  # shellcheck disable=SC2206
+  local -a g=( $spec )
+  local i row active_txt="" failed_txt="" st
+  for i in 0 1 2 3; do
+    st="${g[$i]:-pending}"
+    build_gate_rendered_row row "$width" "$i" "$st"
+    BOTTOM_R_RENDERED+=("$row")
+    [ "$st" = "run" ] && active_txt="$(gate_short_name "$i") (em curso)"
+    [ "$st" = "fail" ] && failed_txt="$(gate_short_name "$i") (falhou)"
+  done
+
+  local flow_p flow_c sum_p sum_c err_p err_c sup_p sup_c
+  if [ "$max_rows" -ge 6 ]; then
+    pad_v flow_p 'Fluxo: G0→G1→G2→G3 (commit só se verdes)' "$width"
+    BOTTOM_R_RENDERED+=("${C_MUTED}${flow_p}${C_RESET}")
   fi
 
-  box_bottom_v bot "$((panel_width - 2))"
+  local cyc="${META[cycle]:-—}/${META[cycle_max]:-—}"
+  local state_desc="aguardando"
+  if [ -n "$active_txt" ]; then
+    state_desc="$active_txt"
+  elif [ -n "$failed_txt" ]; then
+    state_desc="Bloqueado em $failed_txt"
+  elif [ -n "${META[gate]:-}" ]; then
+    state_desc="${META[gate]}"
+  elif [ "${META[status]:-}" = "finished" ]; then
+    state_desc="Todos os gates verdes"
+  fi
+  pad_v sum_p "Ciclo: $cyc · Ativo: $state_desc" "$width"
+  sum_c="${C_TEXT_SECONDARY}${sum_p}${C_RESET}"
+  BOTTOM_R_RENDERED+=("$sum_c")
+
+  if [ -n "${META[last_error]:-}" ] && [ "${#BOTTOM_R_RENDERED[@]}" -lt "$max_rows" ]; then
+    pad_v err_p "Último erro: ${META[last_error]}" "$width"
+    err_c="${C_DANGER}${err_p}${C_RESET}"
+    BOTTOM_R_RENDERED+=("$err_c")
+  fi
+
+  if [ -n "${RECOVERY[supervisor_state]:-}" ] && [ "${#BOTTOM_R_RENDERED[@]}" -lt "$max_rows" ]; then
+    pad_v sup_p "Supervisor: ${RECOVERY[supervisor_state]} (${RECOVERY[retries_used]:-0}/${RECOVERY[retries_limit]:-3})" "$width"
+    sup_c="${C_CYAN}${sup_p}${C_RESET}"
+    BOTTOM_R_RENDERED+=("$sup_c")
+  fi
+
+  while [ "${#BOTTOM_R_RENDERED[@]}" -lt "$max_rows" ]; do
+    pad_v row '' "$width"
+    BOTTOM_R_RENDERED+=("$row")
+  done
+}
+
+draw_single_bottom_box() { # <title> <body_width> <panel_inner_width> <items...>
+  local title="$1" bwidth="$2" pwidth="$3"
+  shift 3
+  local top bot row
+  box_top_v top "$pwidth" "$title"
+  printf '%s\n' "$top"
+  for row in "$@"; do
+    printf '%s%s│%s %s %s│%s\n' "$C_SURFACE" "$C_BORDER" "$C_RESET" "$row" "$C_BORDER" "$C_LINE_RESET"
+  done
+  box_bottom_v bot "$pwidth"
   printf '%s\n' "$bot"
+}
+
+draw_bottom_panels() {
+  [ "$LOG_PANEL_LINES" -gt 0 ] || return 0
+
+  local target g_title="GATES"
+  target="$(gates_target_phase)"
+  [ -n "$target" ] && g_title="GATES (FASE $target)"
+
+  local -a BOTTOM_L_RENDERED=() BOTTOM_R_RENDERED=()
+
+  if [ "$W" -ge 96 ]; then
+    local lw=$(( (W - 1) / 2 )) rw
+    rw=$(( W - lw - 2 ))
+    local li=$(( lw - 2 )) ri=$(( rw - 2 ))
+    local l_body=$(( li - 2 )) r_body=$(( ri - 2 ))
+    local body_rows=$(( LOG_PANEL_LINES - 2 ))
+    [ "$body_rows" -lt 5 ] && body_rows=5
+
+    collect_log_rows "$body_rows" "$l_body"
+    collect_gate_rows "$body_rows" "$r_body" "$target"
+
+    local top_l top_r bot_l bot_r i
+    box_top_v top_l "$li" 'LOGS RECENTES'
+    box_top_v top_r "$ri" "$g_title"
+    box_bottom_v bot_l "$li"
+    box_bottom_v bot_r "$ri"
+    printf '%s %s\n' "$top_l" "$top_r"
+    for ((i = 0; i < body_rows; i++)); do
+      printf '%s%s│%s %s %s│%s %s│%s %s %s│%s\n' \
+        "$C_SURFACE" "$C_BORDER" "$C_RESET" "${BOTTOM_L_RENDERED[$i]}" "$C_BORDER" "$C_RESET" \
+        "$C_BORDER" "$C_RESET" "${BOTTOM_R_RENDERED[$i]}" "$C_BORDER" "$C_LINE_RESET"
+    done
+    printf '%s %s\n' "$bot_l" "$bot_r"
+    return 0
+  fi
+
+  # Largura estreita (< 96): empilha sem quebrar bordas, respeitando o orcamento de linhas.
+  local panel_width=$(( W - 1 ))
+  local pinner=$(( panel_width - 2 ))
+  local bwidth=$(( panel_width - 4 ))
+  collect_gate_rows 5 "$bwidth" "$target"
+  draw_single_bottom_box "$g_title" "$bwidth" "$pinner" "${BOTTOM_R_RENDERED[@]}"
+  if [ "$LOG_PANEL_LINES" -ge 13 ]; then
+    collect_log_rows 4 "$bwidth"
+    draw_single_bottom_box 'LOGS RECENTES' "$bwidth" "$pinner" "${BOTTOM_L_RENDERED[@]}"
+  fi
 }
 
 draw_scroll_footer() {
@@ -1041,7 +1280,7 @@ draw_scroll_footer() {
 render() {
   printf '%s\n' "$HEAD"
   draw_table
-  draw_log_panel
+  draw_bottom_panels
   if [ -n "${META[note]:-}" ]; then
     printf '\n%s%s%s\n' "$C_YELLOW" "${META[note]}" "$C_RESET"
   fi
