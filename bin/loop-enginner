@@ -8,6 +8,8 @@
 #   uninstall  remove exatamente o que o install criou (fail-closed)
 #   new        cria .loop-enginner/PHASES.md a partir do template
 #   run        roda o loop (lib/loop.sh) no projeto atual
+#   resume     retoma run pausado ou falho com limpeza segura da fase incompleta
+#   pause      solicita pausa graciosa ao fim da fase/ciclo atual
 #   watch      abre o painel (lib/loop-watch.sh)
 #   status     mostra instalacao, engines e estado do ultimo run
 #   doctor     checa pre-requisitos da maquina
@@ -58,6 +60,8 @@ Uso:
   loop-enginner uninstall [--target DIR] [--purge]
   loop-enginner new [--target DIR]
   loop-enginner run [opcoes do loop] [PHASES.md]
+  loop-enginner resume [--target DIR] [opcoes do loop] [PHASES.md]
+  loop-enginner pause [--target DIR] [--cancel]
   loop-enginner watch [opcoes do painel]
   loop-enginner status [--target DIR]
   loop-enginner doctor
@@ -293,6 +297,69 @@ cmd_run() {
   exec bash "$LIB_DIR/loop.sh" "$@"
 }
 
+cmd_resume() {
+  parse_target "$@"
+  if [ -n "$TARGET_ARG" ]; then
+    ROOT="$(target_root "$TARGET_ARG")"
+    cd "$ROOT"
+  fi
+  if [ "${#REST_ARGS[@]}" -gt 0 ]; then
+    cmd_run --resume "${REST_ARGS[@]}"
+  else
+    cmd_run --resume
+  fi
+}
+
+cmd_pause() {
+  local cancel=0
+  local -a args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --cancel) cancel=1; shift ;;
+      *)        args+=("$1"); shift ;;
+    esac
+  done
+  if [ "${#args[@]}" -gt 0 ]; then
+    parse_target "${args[@]}"
+  else
+    TARGET_ARG=""
+    REST_ARGS=()
+  fi
+  [ "${#REST_ARGS[@]}" -eq 0 ] || die "argumentos nao reconhecidos em pause: ${REST_ARGS[*]}"
+  ROOT="$(target_root "$TARGET_ARG")"
+  local state_dir="$ROOT/.loop-enginner/state"
+  local pause_file="$state_dir/pause.request"
+  local lock_file="$state_dir/run.lock"
+  local run_tsv="$state_dir/run.tsv"
+
+  if [ "$cancel" -eq 1 ]; then
+    if [ -f "$pause_file" ]; then
+      rm -f "$pause_file"
+      ok "solicitacao de pausa cancelada em $ROOT"
+    else
+      info "nenhuma pausa pendente em $ROOT"
+    fi
+    return 0
+  fi
+
+  local active=0 owner_pid="" st=""
+  if [ -f "$lock_file" ]; then
+    owner_pid="$(cut -f1 "$lock_file" 2>/dev/null | head -n 1 || true)"
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
+      active=1
+    fi
+  fi
+  if [ "$active" -eq 0 ] && [ -f "$run_tsv" ]; then
+    st="$(awk -F'\t' '$1=="META" && $2=="status" {v=$3} END {print v}' "$run_tsv")"
+    [ "$st" = "running" ] && active=1
+  fi
+  [ "$active" -eq 1 ] || die "nenhum run ativo neste repositorio para pausar"
+
+  mkdir -p "$state_dir"
+  printf '1\n' > "$pause_file"
+  ok "pausa solicitada em $ROOT — finaliza a fase atual antes de parar (retome com: loop-enginner resume)"
+}
+
 cmd_watch() {
   [ -x "$LIB_DIR/loop-watch.sh" ] || die "lib/loop-watch.sh nao encontrado em $HOME_DIR (clone incompleto?)"
   # Sem caminho posicional, o painel le o repo atual.
@@ -349,6 +416,8 @@ cmd_doctor() {
     || { printf '  FALTA   lib/loop.sh executavel\n'; fails=$((fails + 1)); }
   [ -f "$LIB_DIR/fallback.sh" ] && printf '  ok      lib/fallback.sh presente\n' \
     || { printf '  FALTA   lib/fallback.sh presente\n'; fails=$((fails + 1)); }
+  [ -f "$LIB_DIR/recovery.sh" ] && printf '  ok      lib/recovery.sh presente\n' \
+    || { printf '  FALTA   lib/recovery.sh presente\n'; fails=$((fails + 1)); }
   [ -x "$LIB_DIR/loop-watch.sh" ] && printf '  ok      lib/loop-watch.sh executavel\n' \
     || { printf '  FALTA   lib/loop-watch.sh executavel\n'; fails=$((fails + 1)); }
   [ -f "$ADAPTERS_DIR/agy.sh" ] && printf '  ok      adapters/agy.sh presente\n' \
@@ -384,6 +453,8 @@ main() {
     uninstall) shift; cmd_uninstall "$@" ;;
     new)       shift; cmd_new "$@" ;;
     run)       shift; cmd_run "$@" ;;
+    resume)    shift; cmd_resume "$@" ;;
+    pause)     shift; cmd_pause "$@" ;;
     watch)     shift; cmd_watch "$@" ;;
     status)    shift; cmd_status "$@" ;;
     doctor)    shift; cmd_doctor "$@" ;;

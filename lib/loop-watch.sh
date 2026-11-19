@@ -84,6 +84,7 @@ $FORCE_COLOR || [ -t 1 ] || USE_COLOR=false
 STATE_DIR="$REPO/.loop-enginner/state"
 RUN_STATE="$STATE_DIR/run.tsv"
 LIVE_STATE="$STATE_DIR/live.tsv"
+PAUSE_FILE="$STATE_DIR/pause.request"
 LOG_DIR="$REPO/.loop-enginner/logs"
 LOG_PANEL_LINES=4
 
@@ -134,6 +135,7 @@ watch_health() {
   case "$status" in
     failed)  printf 'recovery_required' ;;
     running) printf 'heartbeat_stale' ;;
+    paused)  printf 'healthy' ;;
     *)       printf 'healthy' ;;
   esac
 }
@@ -546,8 +548,15 @@ task_counts() {
 
 run_status_label() {
   case "${META[status]:-running}" in
-    running)  printf '%s▶ Em execução%s' "$C_RUNNING" "$C_RESET" ;;
+    running)
+      if [ -f "$PAUSE_FILE" ]; then
+        printf '%s⏸ Pausando após fase atual%s' "$C_WARNING" "$C_RESET"
+      else
+        printf '%s▶ Em execução%s' "$C_RUNNING" "$C_RESET"
+      fi
+      ;;
     waiting)  printf '%s⏸ Aguardando reset de limite%s' "$C_YELLOW" "$C_RESET" ;;
+    paused)   printf '%s⏸ Pausado%s' "$C_WARNING" "$C_RESET" ;;
     finished) printf '%s✓ Concluído%s' "$C_GREEN" "$C_RESET" ;;
     failed)   printf '%s✗ Falhou%s' "$C_RED" "$C_RESET" ;;
     *)        printf '%s· %s%s' "$C_MUTED" "${META[status]:-?}" "$C_RESET" ;;
@@ -556,8 +565,15 @@ run_status_label() {
 
 run_status_plain() {
   case "${META[status]:-running}" in
-    running)  printf '▶ Em execução' ;;
+    running)
+      if [ -f "$PAUSE_FILE" ]; then
+        printf '⏸ Pausando após fase atual'
+      else
+        printf '▶ Em execução'
+      fi
+      ;;
     waiting)  printf '⏸ Aguardando reset de limite' ;;
+    paused)   printf '⏸ Pausado' ;;
     finished) printf '✓ Concluído' ;;
     failed)   printf '✗ Falhou' ;;
     *)        printf '· %s' "${META[status]:-?}" ;;
@@ -1270,7 +1286,7 @@ draw_scroll_footer() {
     mode="rolagem manual"
   fi
   if [ -n "${KEY_FD:-}" ]; then
-    help=" · ↑↓ PgUp/PgDn rolam · f segue a fase"
+    help=" · ↑↓ PgUp/PgDn rolam · f segue a fase · p pausa"
     $EMBEDDED || help+=" · q sai"
   fi
   printf '%s  ▲ %d acima · ▼ %d abaixo · %s%s%s\n' \
@@ -1363,6 +1379,14 @@ handle_key() { # <char lido>
     g)     FOLLOW=false; OFF=0 ;;
     G)     FOLLOW=false; OFF=$MAX_OFF ;;
     f|F)   FOLLOW=true ;;
+    p|P)
+      mkdir -p "$STATE_DIR" 2>/dev/null || true
+      if [ -f "$PAUSE_FILE" ]; then
+        rm -f "$PAUSE_FILE" 2>/dev/null || true
+      else
+        date +%s > "$PAUSE_FILE" 2>/dev/null || true
+      fi
+      ;;
     # embutido no loop-enginner o painel e dono da tela alternativa que o loop-enginner abriu:
     # sair aqui deixaria a tela congelada com o run ainda em andamento.
     q|Q)   $EMBEDDED || QUIT=true ;;
@@ -1460,7 +1484,7 @@ main() {
       # coluna — um \033[K ali apagaria o proprio caractere que acabou de sair.
       printf '\033[H%s\033[J' $'\033[K'"${frame//$'\n'/$'\n\033[K'}"
       case "${META[status]:-running}" in
-        finished|failed)
+        finished|failed|paused)
           $EMBEDDED && break
           ;;
       esac

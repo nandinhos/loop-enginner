@@ -30,6 +30,7 @@
 #   --no-verify              desliga o gate 3 (equivale a LOOP_ENGINNER_VERIFY=off)
 #   --test-cmd "<cmd>"       comando de teste do projeto (gate 2)
 #   --fallback-chain LIST    cadeia de fallback (ex: "auto" ou "codex agy")
+#   --resume                 retoma run pausado ou falho com limpeza segura
 #   --dashboard              painel ao vivo no terminal (requer loop-watch.sh;
 #                            logs em .loop-enginner/logs/loop.log)
 #
@@ -173,24 +174,32 @@ MAX_CYCLES="${LOOP_ENGINNER_MAX_CYCLES:-3}"
 VERIFY_MODE="${LOOP_ENGINNER_VERIFY:-always}"
 VERIFY_MODEL=""
 DASHBOARD=false
+RESUME=false
+CLI_SET_ENGINE=0
+CLI_SET_FALLBACK=0
+CLI_SET_INPUT=0
+CLI_SET_TEST_CMD=0
+CLI_SET_VERIFY=0
+CLI_SET_MAX_CYCLES=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --engine)         ENGINE="$2"; shift 2 ;;
-    --engine=*)       ENGINE="${1#*=}"; shift ;;
-    --fallback-chain)   FALLBACK_CHAIN_SPEC="$2"; shift 2 ;;
-    --fallback-chain=*) FALLBACK_CHAIN_SPEC="${1#*=}"; shift ;;
+    --engine)         ENGINE="$2"; CLI_SET_ENGINE=1; shift 2 ;;
+    --engine=*)       ENGINE="${1#*=}"; CLI_SET_ENGINE=1; shift ;;
+    --fallback-chain)   FALLBACK_CHAIN_SPEC="$2"; CLI_SET_FALLBACK=1; shift 2 ;;
+    --fallback-chain=*) FALLBACK_CHAIN_SPEC="${1#*=}"; CLI_SET_FALLBACK=1; shift ;;
     --from)           FROM_PHASE="$2"; shift 2 ;;
     --from=*)         FROM_PHASE="${1#*=}"; shift ;;
-    --max-cycles)     MAX_CYCLES="$2"; shift 2 ;;
-    --max-cycles=*)   MAX_CYCLES="${1#*=}"; shift ;;
-    --test-cmd)       TEST_CMD_FLAG="$2"; shift 2 ;;
-    --test-cmd=*)     TEST_CMD_FLAG="${1#*=}"; shift ;;
+    --max-cycles)     MAX_CYCLES="$2"; CLI_SET_MAX_CYCLES=1; shift 2 ;;
+    --max-cycles=*)   MAX_CYCLES="${1#*=}"; CLI_SET_MAX_CYCLES=1; shift ;;
+    --test-cmd)       TEST_CMD_FLAG="$2"; CLI_SET_TEST_CMD=1; shift 2 ;;
+    --test-cmd=*)     TEST_CMD_FLAG="${1#*=}"; CLI_SET_TEST_CMD=1; shift ;;
     --keep-going)     KEEP_GOING=true; shift ;;
-    --no-verify)      VERIFY_MODE="off"; shift ;;
+    --no-verify)      VERIFY_MODE="off"; CLI_SET_VERIFY=1; shift ;;
+    --resume)         RESUME=true; shift ;;
     --dashboard)      DASHBOARD=true; shift ;;
-    -h|--help)        sed -n '2,83p' "$0"; exit 0 ;;
-    *)                INPUT_FILE="$1"; shift ;;
+    -h|--help)        sed -n '2,88p' "$0"; exit 0 ;;
+    *)                INPUT_FILE="$1"; CLI_SET_INPUT=1; shift ;;
   esac
 done
 
@@ -204,6 +213,14 @@ RUN_STATE="$STATE_DIR/run.tsv"
 LIVE_STATE="$STATE_DIR/live.tsv"
 HISTORY_FILE="$STATE_DIR/history.tsv"
 LOOP_ENGINNER_LOG="$LOG_DIR/loop.log"
+
+# shellcheck source=/dev/null
+source "$LOOP_HOME_DIR/lib/recovery.sh"
+
+ACTIVE_WATCHDOG_PID=""
+ACTIVE_WATCHDOG_STAMP=""
+ACTIVE_CHILD_PID=""
+PAUSED_RUN=0
 
 MAX_LIMIT_WAITS="${LOOP_ENGINNER_MAX_LIMIT_WAITS:-20}"
 LIMIT_WAIT_DEFAULT="${LOOP_ENGINNER_LIMIT_WAIT_DEFAULT:-1800}"
@@ -498,7 +515,37 @@ resolve_test_cmd() {
   fi
 }
 
+restore_session_defaults() {
+  $RESUME || return 0
+  recovery_session_read || return 0
+  if [ "$CLI_SET_ENGINE" -eq 0 ] && [ -n "${SESSION_META[engine]:-}" ]; then
+    ENGINE="${SESSION_META[engine]}"
+  fi
+  if [ "$CLI_SET_FALLBACK" -eq 0 ] && [ -z "${LOOP_ENGINNER_FALLBACK_CHAIN+x}" ] && [ -n "${SESSION_META[fallback_chain]:-}" ]; then
+    FALLBACK_CHAIN_SPEC="${SESSION_META[fallback_chain]}"
+  fi
+  if [ "$CLI_SET_INPUT" -eq 0 ] && [ -z "$INPUT_FILE" ] && [ -n "${SESSION_META[input_file]:-}" ]; then
+    INPUT_FILE="${SESSION_META[input_file]}"
+  fi
+  if [ "$CLI_SET_TEST_CMD" -eq 0 ] && [ -z "$TEST_CMD_FLAG" ] && [ -z "${LOOP_ENGINNER_TEST_CMD+x}" ] && [ -n "${SESSION_META[test_cmd]:-}" ]; then
+    TEST_CMD_FLAG="${SESSION_META[test_cmd]}"
+  fi
+  if [ "$CLI_SET_VERIFY" -eq 0 ] && [ -z "${LOOP_ENGINNER_VERIFY+x}" ] && [ -n "${SESSION_META[verify_mode]:-}" ]; then
+    VERIFY_MODE="${SESSION_META[verify_mode]}"
+  fi
+  if [ "$CLI_SET_MAX_CYCLES" -eq 0 ] && [ -z "${LOOP_ENGINNER_MAX_CYCLES+x}" ] && [ -n "${SESSION_META[max_cycles]:-}" ]; then
+    MAX_CYCLES="${SESSION_META[max_cycles]}"
+  fi
+}
+
 preflight_checks() {
+  if ! git rev-parse --is-inside-work-tree &> /dev/null 2>&1; then
+    fail "Requer um repositorio git."
+    exit 1
+  fi
+
+  restore_session_defaults
+
   if [[ "$ENGINE" != "codex" && "$ENGINE" != "claude" ]] && ! is_adapter_engine "$ENGINE"; then
     fail "Engine invalida: $ENGINE. Use 'codex', 'claude', 'agy' ou 'opencode'."
     exit 1
@@ -542,11 +589,6 @@ preflight_checks() {
     exit 1
   fi
 
-  if ! git rev-parse --is-inside-work-tree &> /dev/null 2>&1; then
-    fail "Requer um repositorio git."
-    exit 1
-  fi
-
   resolve_input_file
 
   if [ ! -f "$INPUT_FILE" ]; then
@@ -557,10 +599,19 @@ preflight_checks() {
   validate_input_format
   exclude_phases_dir
 
+  recovery_lock_acquire || exit 1
+  trap 'on_exit EXIT' EXIT
+  trap 'on_exit INT' INT
+  trap 'on_exit TERM' TERM
+
+  if $RESUME; then
+    recovery_prepare_resume || exit 1
+  fi
+
   # Arvore limpa: 'git add -A' da primeira fase engoliria trabalho nao commitado.
   if [ -n "$(git status --porcelain)" ]; then
     fail "Arvore de trabalho suja. loop-enginner commita por fase e engoliria suas mudancas."
-    fail "Commite ou stashe antes de rodar:"
+    fail "Commite, stashe ou use 'loop-enginner resume' se houver fase interrompida:"
     git status --short | sed 's/^/    /'
     exit 1
   fi
@@ -796,6 +847,8 @@ state_init() {
 
   META=(
     [project]="$(basename "$(pwd)")"
+    [branch]="$(git branch --show-current 2>/dev/null || printf 'detached')"
+    [start_head]="${LOOP_ENGINNER_RUN_START_HEAD:-$(git rev-parse HEAD 2>/dev/null || true)}"
     [engine]="$ENGINE"
     [provider]="$cur"
     [model]="$(fallback_provider_meta "$cur" model)"
@@ -805,10 +858,10 @@ state_init() {
     [verify_model]="${VERIFY_MODEL:-—}"
     [input]="$INPUT_FILE"
     [status]="running"
-    [started]="$(date +%s)"
+    [started]="${LOOP_ENGINNER_RUN_START_EPOCH:-$(date +%s)}"
     [ended]=""
     [pid]="$$"
-    [run]="run-$(date '+%m%d-%H%M%S')"
+    [run]="run-$(date '+%m%d-%H%M%S')-$$"
     [cycle_max]="$MAX_CYCLES"
     [test_cmd]="${TEST_CMD:-—}"
     [phase_cur]=""
@@ -1273,7 +1326,7 @@ PROTO
 }
 
 build_impl_prompt() {
-  local phase_file="$1" cycle="$2"
+  local phase_file="$1" cycle="$2" resume_gate="${3:-}" resume_cause="${4:-}" resume_diff="${5:-}" resume_lessons="${6:-}"
   local prompt_file="$PROMPT_DIR/${phase_file%.md}.cycle-${cycle}.txt"
 
   {
@@ -1281,6 +1334,9 @@ build_impl_prompt() {
     echo
     context_preamble
     task_protocol_block
+    if [ -n "$resume_gate" ] || [ -n "$resume_cause" ] || [ -n "$resume_diff" ] || [ -n "$resume_lessons" ]; then
+      recovery_systematic_debug_block "$resume_gate" "$resume_cause" "$resume_diff" "$resume_lessons"
+    fi
     cat <<'TASK'
 
 ## Sua tarefa agora
@@ -1309,10 +1365,9 @@ TASK
   echo "$prompt_file"
 }
 
-# Prompt de correcao: auto-contido. Carrega a fase inteira + a causa REAL
-# da falha (nunca "os testes falharam" generico).
+# Prompt de correcao: auto-contido com Debug Sistematico + causa real.
 build_fix_prompt() {
-  local phase_file="$1" cycle="$2" gate="$3" cause="$4"
+  local phase_file="$1" cycle="$2" gate="$3" cause="$4" diff_file="${5:-}" lessons_file="${6:-}"
   local prompt_file="$PROMPT_DIR/${phase_file%.md}.cycle-${cycle}.txt"
 
   {
@@ -1332,11 +1387,7 @@ antes de mudar qualquer coisa.
 - Nao deixe TODOs, placeholders ou testes pulados.
 - Rode a suite de testes do projeto ao final e garanta que ela passa.
 INTRO
-    echo
-    echo "## Motivo da falha ($gate)"
-    echo '```'
-    echo "$cause"
-    echo '```'
+    recovery_systematic_debug_block "$gate" "$cause" "$diff_file" "$lessons_file"
     echo
     echo "## Fase a completar"
     cat "$PHASES_DIR/$phase_file"
@@ -1567,21 +1618,31 @@ run_engine() {
       : > "$log_file"
       wd_limit="$(fallback_provider_inactivity_timeout "$cur_provider")"
       wd_pid="$(fallback_watchdog_start "$log_file" "$stamp" "$wd_limit")"
+      ACTIVE_WATCHDOG_PID="$wd_pid"
+      ACTIVE_WATCHDOG_STAMP="$stamp"
     fi
 
     if [[ "$mode" == "verify" ]]; then
-      _exec_with_pid "$pid_file" "$cur_provider" verify "$prompt_file" "$eff_verify_model" \
-        | tee "$log_file" || rc=$?
+      (
+        set -o pipefail
+        _exec_with_pid "$pid_file" "$cur_provider" verify "$prompt_file" "$eff_verify_model" \
+          | tee "$log_file"
+      ) &
+      ACTIVE_CHILD_PID=$!
+      if wait "$ACTIVE_CHILD_PID"; then rc=0; else rc=$?; fi
+      ACTIVE_CHILD_PID=""
     else
       local quiet=0
       $DASHBOARD && quiet=1
-      if _exec_with_pid "$pid_file" "$cur_provider" impl "$prompt_file" "" \
-           | tee "$log_file" \
-           | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"; then
-        rc=0
-      else
-        rc=$?
-      fi
+      (
+        set -o pipefail
+        _exec_with_pid "$pid_file" "$cur_provider" impl "$prompt_file" "" \
+          | tee "$log_file" \
+          | stream_watch "$LIVE_STATE" "${LOOP_ENGINNER_PHASE_NUM:-0}" "$quiet" "$CURRENT_PHASE_FILE"
+      ) &
+      ACTIVE_CHILD_PID=$!
+      if wait "$ACTIVE_CHILD_PID"; then rc=0; else rc=$?; fi
+      ACTIVE_CHILD_PID=""
     fi
 
     if [ -n "$wd_pid" ]; then
@@ -1591,6 +1652,8 @@ run_engine() {
         warn "Provider '$cur_provider' sem progresso util ha $(cat "$stamp.stalled")s (limite ${wd_limit}s)."
       fi
       rm -f "$stamp".*
+      ACTIVE_WATCHDOG_PID=""
+      ACTIVE_WATCHDOG_STAMP=""
     fi
 
     if [ "${#FALLBACK_PROVIDERS[@]}" -gt 1 ]; then
@@ -1836,6 +1899,46 @@ run_phase() {
   LIMIT_WAITS=0
   GATE_CAUSE=""
 
+  local phase_base_head phase_slug before_untracked
+  phase_base_head="$(git rev-parse HEAD 2>/dev/null || true)"
+  phase_slug="$(_rec_phase_slug "$phase_num")"
+  before_untracked="$RECOVERY_DIR/${phase_slug}-untracked-before.txt"
+  recovery_snapshot_untracked "$before_untracked"
+
+  local resume_gate="" resume_cause="" resume_diff="" resume_lessons=""
+  if [ "${RESUME_CLEANED_PHASE:-}" = "$phase_num" ]; then
+    resume_gate="${RESUME_LAST_GATE:-}"
+    if [ -n "${RESUME_LAST_CAUSE_FILE:-}" ] && [ -s "$RESUME_LAST_CAUSE_FILE" ]; then
+      resume_cause="$(head -n 60 "$RESUME_LAST_CAUSE_FILE")"
+    fi
+    resume_diff="${RESUME_LAST_DIFF_FILE:-}"
+    resume_lessons="${RESUME_LESSONS_FILE:-}"
+    RESUME_CLEANED_PHASE=""
+  fi
+
+  SESSION_META=(
+    [state]="running"
+    [phase_num]="$phase_num"
+    [phase_file]="$phase_file"
+    [phase_title]="$phase_title"
+    [base_head]="$phase_base_head"
+    [run_start_head]="${META[start_head]:-$phase_base_head}"
+    [input_file]="$INPUT_FILE"
+    [input_stamp]="$(sed -n '1s/^# stamp: //p' "$MANIFEST" 2>/dev/null || true)"
+    [engine]="$ENGINE"
+    [fallback_chain]="$FALLBACK_CHAIN_SPEC"
+    [active_provider]="${ACTIVE_PROVIDER:-$ENGINE}"
+    [test_cmd]="$TEST_CMD"
+    [verify_mode]="$VERIFY_MODE"
+    [max_cycles]="$MAX_CYCLES"
+    [last_gate]="$resume_gate"
+    [last_cause_file]="${RESUME_LAST_CAUSE_FILE:-}"
+    [last_diff_file]="$resume_diff"
+    [lessons_file]="${resume_lessons:-$RECOVERY_DIR/${phase_slug}-lessons.md}"
+    [untracked_before_file]="$before_untracked"
+  )
+  recovery_session_write
+
   echo ""
   log "[$seq/$total] Phase $phase_num: $phase_title"
   emit_hook phase_start "[$seq/$total] $phase_title"
@@ -1854,9 +1957,9 @@ run_phase() {
     log_file="$LOG_DIR/${phase_file%.md}.cycle-${cycle}.log"
 
     if [ "$cycle" -eq 1 ]; then
-      prompt_file=$(build_impl_prompt "$phase_file" "$cycle")
+      prompt_file=$(build_impl_prompt "$phase_file" "$cycle" "$resume_gate" "$resume_cause" "$resume_diff" "$resume_lessons")
     else
-      prompt_file=$(build_fix_prompt "$phase_file" "$cycle" "$LAST_GATE" "$GATE_CAUSE")
+      prompt_file=$(build_fix_prompt "$phase_file" "$cycle" "$LAST_GATE" "$GATE_CAUSE" "${SESSION_META[last_diff_file]:-}" "${SESSION_META[lessons_file]:-}")
     fi
 
     sig_before=$(tree_signature)
@@ -1936,6 +2039,25 @@ run_phase() {
 
     if [ "$gate_verdict" = "red" ]; then
       state_meta last_error "$(printf '%s' "$GATE_CAUSE" | head -n 1 | cut -c1-70)"
+      local cause_file="$RECOVERY_DIR/${phase_slug}-last-cause.txt"
+      printf '%s\n' "$GATE_CAUSE" > "$cause_file"
+      local rec_lesson
+      rec_lesson="$(recovery_record_lesson "$phase_num" "$LAST_GATE" "$cause_file" "${SESSION_META[last_diff_file]:-}")"
+      SESSION_META[active_provider]="${ACTIVE_PROVIDER:-$ENGINE}"
+      SESSION_META[last_gate]="$LAST_GATE"
+      SESSION_META[last_cause_file]="$cause_file"
+      SESSION_META[lessons_file]="$rec_lesson"
+      recovery_session_write
+
+      if recovery_pause_requested; then
+        recovery_pause_clear
+        SESSION_META[state]="paused"
+        recovery_session_write
+        PAUSED_RUN=1
+        state_phase_end "$phase_num" incomplete
+        warn "Pausa solicitada apos falha ($LAST_GATE) na Phase $phase_num (ciclo $cycle/$MAX_CYCLES)."
+        return 0
+      fi
     else
       local phase_duration=$(($(date +%s) - phase_start))
 
@@ -1952,6 +2074,13 @@ run_phase() {
         history_record phase_already_done "$phase_num" "gates verdes contra HEAD"
         emit_hook phase_already_done "$phase_title — gates verdes contra HEAD, nada a commitar"
         state_phase_end "$phase_num" done
+        SESSION_META[phase_num]=""
+        SESSION_META[phase_file]=""
+        SESSION_META[phase_title]=""
+        SESSION_META[last_gate]=""
+        SESSION_META[last_cause_file]=""
+        SESSION_META[last_diff_file]=""
+        recovery_session_write
         return 0
       fi
 
@@ -1960,12 +2089,28 @@ run_phase() {
         LAST_GATE="commit"
         emit_hook phase_failed "$phase_title — falha no commit da fase"
         state_phase_end "$phase_num" failed
+        SESSION_META[state]="failed"
+        SESSION_META[last_gate]="$LAST_GATE"
+        recovery_session_write
         return 1
       fi
+      local commit_hash commit_subj
+      commit_hash="$(git rev-parse --short HEAD 2>/dev/null || true)"
+      commit_subj="$(git log -1 --pretty=%s 2>/dev/null || true)"
       mark_phase_done "$phase_file"
+      history_record phase_commit "$phase_num" "${commit_hash}|${commit_subj}|${ACTIVE_PROVIDER:-$ENGINE}|${phase_duration}|${cycle}"
       history_record phase_done "$phase_num" "completa em $(format_duration "$phase_duration")"
       emit_hook phase_done "$phase_title — completa em $(format_duration "$phase_duration")"
       state_phase_end "$phase_num" done
+      SESSION_META[base_head]="$(git rev-parse HEAD 2>/dev/null || true)"
+      SESSION_META[phase_num]=""
+      SESSION_META[phase_file]=""
+      SESSION_META[phase_title]=""
+      SESSION_META[active_provider]="${ACTIVE_PROVIDER:-$ENGINE}"
+      SESSION_META[last_gate]=""
+      SESSION_META[last_cause_file]=""
+      SESSION_META[last_diff_file]=""
+      recovery_session_write
       return 0
     fi
 
@@ -1974,6 +2119,8 @@ run_phase() {
 
   local phase_duration=$(($(date +%s) - phase_start))
   state_phase_end "$phase_num" failed
+  SESSION_META[state]="failed"
+  recovery_session_write
   fail "Phase $phase_num: $phase_title — FALHOU apos $MAX_CYCLES ciclos ($(format_duration "$phase_duration"))"
   emit_hook phase_failed "$phase_title — falhou apos $MAX_CYCLES ciclos ($LAST_GATE)"
   fail "Ultima causa ($LAST_GATE):"
@@ -2036,13 +2183,38 @@ stop_dashboard() {
 }
 
 # Sem isto, um Ctrl-C no meio de um run deixa o terminal na tela alternativa e
-# sem cursor.
+# sem cursor, ou deixa watchdog/.pid/lock orfaos para tras.
 on_exit() {
-  local code=$?
+  local sig="${1:-EXIT}" code=$?
+  trap - EXIT INT TERM
+  [ "$sig" = "INT" ] && code=130
+  [ "$sig" = "TERM" ] && code=143
+
+  if [ -n "${ACTIVE_WATCHDOG_PID:-}" ]; then
+    fallback_watchdog_stop "$ACTIVE_WATCHDOG_PID" "$ACTIVE_WATCHDOG_STAMP" 2>/dev/null || true
+    ACTIVE_WATCHDOG_PID=""
+  fi
+  if [ -n "${ACTIVE_CHILD_PID:-}" ]; then
+    fallback_kill_tree "$ACTIVE_CHILD_PID" TERM 2>/dev/null || true
+    wait "$ACTIVE_CHILD_PID" 2>/dev/null || true
+    ACTIVE_CHILD_PID=""
+  fi
+  if [ -n "${ACTIVE_WATCHDOG_STAMP:-}" ]; then
+    rm -f "${ACTIVE_WATCHDOG_STAMP}".* 2>/dev/null || true
+    ACTIVE_WATCHDOG_STAMP=""
+  fi
+
   if [ -n "${META[status]:-}" ] && [ "${META[status]}" = "running" ]; then
     META[status]="failed"
     META[ended]="$(date +%s)"
     state_flush
+    if declare -F recovery_session_write >/dev/null 2>&1 && [ "${#SESSION_META[@]}" -gt 0 ]; then
+      SESSION_META[state]="failed"
+      recovery_session_write
+    fi
+  fi
+  if declare -F recovery_lock_release >/dev/null 2>&1; then
+    recovery_lock_release
   fi
   stop_dashboard
   exit "$code"
@@ -2059,7 +2231,6 @@ main() {
   split_phases
   apply_from_override
   state_init
-  trap on_exit EXIT INT TERM
   start_dashboard
 
   local total_phases
@@ -2132,7 +2303,24 @@ main() {
       continue
     fi
 
+    if recovery_pause_requested; then
+      recovery_pause_clear
+      SESSION_META[state]="paused"
+      SESSION_META[phase_num]=""
+      SESSION_META[phase_file]=""
+      SESSION_META[phase_title]=""
+      SESSION_META[last_gate]=""
+      SESSION_META[last_cause_file]=""
+      SESSION_META[last_diff_file]=""
+      recovery_session_write
+      PAUSED_RUN=1
+      break
+    fi
+
     if run_phase "$file" "$num" "$title" "$seq" "$total_phases"; then
+      if [ "$PAUSED_RUN" -eq 1 ]; then
+        break
+      fi
       completed_phases+=("$title")
     else
       failed_phases+=("$title")
@@ -2146,6 +2334,26 @@ main() {
     fi
   done 3< <(manifest_entries)
 
+  if [ "$PAUSED_RUN" -eq 1 ]; then
+    local pause_end
+    pause_end=$(date +%s)
+    META[ended]="$pause_end"
+    META[activity]="pausado pelo operador"
+    META[gate]=""
+    META[status]="paused"
+    : > "$LIVE_STATE"
+    state_flush
+    stop_dashboard
+    history_record run_paused "${META[phase_cur]:-0}" "pausa graciosa concluida"
+    emit_hook run_paused "run pausado graciosamente; retome com: loop-enginner resume"
+    echo ""
+    warn "Run pausado graciosamente. Progresso salvo em .loop-enginner/state/session.tsv."
+    log "Para retomar do ponto de parada:"
+    log "    loop-enginner resume"
+    echo ""
+    return 0
+  fi
+
   local end_time total_duration
   end_time=$(date +%s)
   total_duration=$((end_time - start_time))
@@ -2153,7 +2361,18 @@ main() {
   META[ended]="$end_time"
   META[activity]=""
   META[gate]=""
-  if [ ${#failed_phases[@]} -eq 0 ]; then META[status]="finished"; else META[status]="failed"; fi
+  if [ ${#failed_phases[@]} -eq 0 ]; then
+    META[status]="finished"
+    SESSION_META[state]="finished"
+    SESSION_META[phase_num]=""
+    SESSION_META[phase_file]=""
+    SESSION_META[phase_title]=""
+    SESSION_META[base_head]="$(git rev-parse HEAD 2>/dev/null || true)"
+  else
+    META[status]="failed"
+    SESSION_META[state]="failed"
+  fi
+  recovery_session_write
   # O live.tsv e da sessao, nao do run: mante-lo faria o painel exibir para
   # sempre a ultima acao de uma sessao que ja terminou.
   : > "$LIVE_STATE"
